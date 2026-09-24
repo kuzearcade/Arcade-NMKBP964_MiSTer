@@ -64,7 +64,11 @@ module macplus_main #(
 	output reg [31:0] dbg_irq3,
 	output reg [31:0] dbg_iack3,
 	output     [31:0] dbg_idle,
-	output     [31:0] dbg_cache_miss
+	output     [31:0] dbg_cache_miss,
+	// D3: clk_sys cycles from vblank start to the game's first idle-loop write
+	// that frame (its work time); 0 if it never idled
+	output reg [31:0] dbg_work,
+	input             trace_on
 );
 	// ---------------------------------------------------------------- clock enable
 	reg  [7:0] ce_acc;
@@ -97,8 +101,25 @@ module macplus_main #(
 		.ram2_sel(ram2_sel), .ram2_addr(ram2_addr), .ram2_we(ram2_we), .ram2_be(ram2_be), .ram2_din(ram2_din), .ram2_dout(ram2_dout),
 		.board_req(b_req), .board_we(b_we), .board_addr(b_addr), .board_wdata(b_wdata), .board_be(b_be),
 		.board_ack(b_ack), .board_rdata(b_rdata),
-		.dbg_addr(dbg_pc_addr), .dbg_idle_writes(dbg_idle), .dbg_cache_miss(dbg_cache_miss));
-	always @(*) rom_req = c_rom_req;
+		.dbg_addr(dbg_pc_addr), .dbg_idle_writes(dbg_idle), .dbg_cache_miss(dbg_cache_miss), .dbg_idle_pulse(idle_pulse), .trace_on(trace_on));
+	wire idle_pulse;
+	// D3's work time is measured from the level-3 ACKNOWLEDGE, not from vblank
+	// start: the idle loop runs on until the interrupt is taken at an instruction
+	// boundary, and its next counter write could end the window before the
+	// handler began (0.4 us "frames", 2026-09-24). MAME's window starts at the
+	// vector fetch, which is the same instant.
+	reg [31:0] work_cnt;
+	reg        work_armed;
+	always @(posedge clk) begin
+		if (reset) begin work_armed <= 1'b0; dbg_work <= 32'd0; end
+		else if (iack && iack_level == 3'd3) begin
+			if (work_armed) dbg_work <= 32'd0;           // never idled last frame
+			work_cnt <= 32'd0; work_armed <= 1'b1;
+		end else if (work_armed) begin
+			work_cnt <= work_cnt + 32'd1;
+			if (idle_pulse) begin dbg_work <= work_cnt; work_armed <= 1'b0; end
+		end
+	end
 
 	// ---------------------------------------------------------------- IRQ3
 	reg irq3;

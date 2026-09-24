@@ -7,6 +7,7 @@
 // download is signalled by toggling ioctl_download, so the copier runs.
 //   ./obj_dir/Vhw_top IMAGE_BIN FRAMES      (MP_GAME, MP_FRAMEDIR, MP_EVERY as macplus_frames)
 #include "Vhw_top.h"
+#include "Vhw_top___024root.h"
 #include "verilated.h"
 #include <cstdio>
 #include <cstdlib>
@@ -67,15 +68,59 @@ int main(int argc, char **argv) {
 			t->eval(); cyc++;
 		}
 	};
+	if (getenv("MP_PRELOAD")) {   // the fast build: SDRAM holds the image already
+		auto &mem = t->rootp->hw_top__DOT__u_model__DOT__mem;
+		for (long k = 0; k < 0x1600000 / 2; k++) mem[k] = ddr[2*k] | ddr[2*k+1] << 8;
+	}
 	for (int i = 0; i < 200; i++) tick();
 	t->pwr_reset = 0;
 	for (int i = 0; i < 2000; i++) tick();
 	// the download: the image is already in DDR3; toggle ioctl_download
 	t->ioctl_download = 1; for (int i = 0; i < 100; i++) tick(); t->ioctl_download = 0;
 	t->reset = 0; copy_start = cyc;
+	// response check: each stream's requests are recorded when accepted (req & ready)
+	// and its responses compared, in order, with the image's bytes
+	std::deque<uint32_t> spr_q, bg_qs[4];
+	long spr_bad = 0, spr_n = 0, bg_bad[4] = {0,0,0,0}, bg_n[4] = {0,0,0,0};
+	auto img16 = [&](uint32_t off, uint32_t *w) { for (int k = 0; k < 4; k++) { uint32_t v = 0; for (int b = 3; b >= 0; b--) v = v << 8 | ddr[off + 4*k + b]; w[k] = v; } };
+	auto check_streams = [&]() {
+		if (t->t_spr_req && t->t_spr_ready) spr_q.push_back(t->t_spr_addr);
+		if (t->t_spr_valid && !spr_q.empty()) {
+			uint32_t w[4]; img16(0x600000 + spr_q.front(), w); spr_n++;
+			bool ok = true; for (int k = 0; k < 4; k++) ok &= t->t_spr_data[k] == w[k];
+			if (!ok && spr_bad++ < 5) printf("SPR mismatch #%ld addr %06x got %08x.. want %08x..\n", spr_n, spr_q.front(), t->t_spr_data[0], w[0]);
+			spr_q.pop_front();
+		}
+		for (int L = 0; L < 4; L++) {
+			if ((t->t_bg_req >> L & 1) && (t->t_bg_ready >> L & 1)) {
+				uint32_t a = 0; for (int b = 0; b < 23; b++) a |= ((t->t_bg_addr[(L*23+b)/32] >> ((L*23+b)%32)) & 1u) << b;
+				bg_qs[L].push_back(a);
+			}
+			if ((t->t_bg_valid >> L & 1) && !bg_qs[L].empty()) {
+				uint32_t base = L < 3 ? 0x1600000 + L * 0x800000 : 0x500000;
+				uint32_t w[4]; img16(base + bg_qs[L].front(), w); bg_n[L]++;
+				int nw = L < 3 ? 4 : 2; bool ok = true; for (int k = 0; k < nw; k++) ok &= t->t_bg_data[k] == w[k];
+				if (!ok && bg_bad[L]++ < 3) printf("BG%d mismatch #%ld addr %06x got %08x %08x want %08x %08x\n", L, bg_n[L], bg_qs[L].front(), t->t_bg_data[0], t->t_bg_data[1], w[0], w[1]);
+				bg_qs[L].pop_front();
+			}
+		}
+	};
 	while (frame < frames) {
-		tick();
-		if (!copied && t->rom_ready) { copied = true; printf("copy done: %u words in %.2f ms of board time\n", t->dbg_copy_words, (cyc - copy_start) / 96000.0); fflush(stdout); }
+		tick(); if (t->rom_ready) check_streams();
+		if (!copied && t->rom_ready) {
+			copied = true; printf("copy done: %u words in %.2f ms of board time\n", t->dbg_copy_words, (cyc - copy_start) / 96000.0);
+			// the copy's integrity: SDRAM word k must be {image[2k+1], image[2k]}
+			// (with MP_PRELOAD this checks the preload)
+			auto &mem = t->rootp->hw_top__DOT__u_model__DOT__mem;
+			long bad = 0, first = -1;
+			for (long k = 0; k < 0x1600000 / 2; k++) {
+				uint16_t want = ddr[2*k] | ddr[2*k+1] << 8;
+				if (mem[k] != want) { if (first < 0) first = k; bad++; }
+			}
+			printf("copy check: %ld of %d words differ, first at byte 0x%lx\n", bad, 0x1600000 / 2, first * 2);
+			if (first >= 0) for (long k = first; k < first + 8; k++) printf("  byte 0x%lx: sdram %04x image %02x%02x\n", k*2, mem[k], ddr[2*k+1], ddr[2*k]);
+			fflush(stdout);
+		}
 		if (t->ce_pix && t->rom_ready) {
 			int h = t->hcount, v = t->vcount;
 			if (h >= 2 && h <= 385 && v < H) fb[v * 384 + h - 2] = t->rgb;
@@ -94,6 +139,8 @@ int main(int argc, char **argv) {
 			prevv = v;
 		}
 	}
+	printf("stream check: sprite %ld of %ld bad; BG %ld/%ld %ld/%ld %ld/%ld, text %ld/%ld bad\n", spr_bad, spr_n,
+	       bg_bad[0], bg_n[0], bg_bad[1], bg_n[1], bg_bad[2], bg_n[2], bg_bad[3], bg_n[3]);
 	delete t;
 	return 0;
 }

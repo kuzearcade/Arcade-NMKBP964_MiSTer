@@ -65,6 +65,8 @@ module macplus_core #(
 	output     [31:0] dbg_irq3,
 	output     [31:0] dbg_iack3,
 	output     [31:0] dbg_idle,
+	output     [31:0] dbg_work,
+	input             trace_on,      // simulation only: log main-CPU bus cycles
 	output     [31:0] dbg_es_writes,
 	output     [31:0] dbg_es_irq,
 	output     [31:0] dbg_latch_reads,
@@ -96,7 +98,7 @@ module macplus_core #(
 		.inputs(inputs), .dsw(dsw), .vblank_start(vblank_start),
 		.snd_cmd_we(snd_cmd_we), .snd_cmd(snd_cmd), .snd_pending(snd_pending),
 		.ram2_sel(ram2_sel), .ram2_addr(ram2_addr), .ram2_we(ram2_we), .ram2_be(ram2_be), .ram2_din(ram2_din), .ram2_dout(ram2_dout),
-		.dbg_pc_addr(dbg_cpu_addr), .dbg_irq3(dbg_irq3), .dbg_iack3(dbg_iack3), .dbg_idle(dbg_idle), .dbg_cache_miss());
+		.dbg_pc_addr(dbg_cpu_addr), .dbg_irq3(dbg_irq3), .dbg_iack3(dbg_iack3), .dbg_idle(dbg_idle), .dbg_cache_miss(), .dbg_work(dbg_work), .trace_on(trace_on));
 
 	wire [11:0] dbg_pen;
 	wire [7:0]  dbg_spr_hits;

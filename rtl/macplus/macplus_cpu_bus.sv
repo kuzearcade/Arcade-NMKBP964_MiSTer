@@ -48,7 +48,9 @@ module macplus_cpu_bus (
 	// debug
 	output     [31:0] dbg_addr,
 	output reg [31:0] dbg_idle_writes,
-	output reg [31:0] dbg_cache_miss
+	output reg        dbg_idle_pulse,    // one clock per idle-loop counter write
+	output reg [31:0] dbg_cache_miss,
+	input             trace_on           // simulation only (MP_TRACE): log bus cycles while high
 );
 	// ================================================================ TG68K
 	wire        tg_clkena;
@@ -155,11 +157,16 @@ module macplus_cpu_bus (
 	                   ((st == S_IDLE && !active) || adv_live || st == S_RESP);
 
 	always @(posedge clk) begin
-		iack <= 1'b0; cw_we <= 1'b0; ram_we <= 1'b0;
+		iack <= 1'b0; cw_we <= 1'b0; ram_we <= 1'b0; dbg_idle_pulse <= 1'b0;
 		if (lreset) begin
 			st <= S_IDLE; board_req <= 1'b0; rom_req <= 1'b0; cval <= 256'd0;
 			tg_rdata <= 16'hFFFF; dbg_idle_writes <= 32'd0; dbg_cache_miss <= 32'd0;
 		end else begin
+`ifdef MP_TRACE
+			if (st == S_IDLE && strobed && $test$plusargs("mptrace") && trace_on)
+				$display("CYC %06x %s fc%0d be%02b d%04x", tg_addr[23:0], (!tg_nwr && tg_busstate == 2'b11) ? "W" : "R",
+				         tg_fc, {~tg_nuds, ~tg_nlds}, (!tg_nwr) ? tg_wdata : 16'h0000);
+`endif
 			case (st)
 			S_IDLE: if (strobed) begin
 				c_addr <= tg_addr; c_wdata <= tg_wdata; c_we <= !tg_nwr && tg_busstate == 2'b11;
@@ -174,7 +181,9 @@ module macplus_cpu_bus (
 					if (c_we) begin
 						ram_we <= 1'b1;
 						// the idle loop's counter: the word at F1015A, low half of longword F10158
-						if (c_addr[23:2] == 22'h3C4056 && c_be[1:0] != 2'b00) dbg_idle_writes <= dbg_idle_writes + 32'd1;
+						if (c_addr[23:2] == 22'h3C4056 && c_be[1:0] != 2'b00) begin
+							dbg_idle_writes <= dbg_idle_writes + 32'd1; dbg_idle_pulse <= 1'b1;
+						end
 						if (cpu_ce) st <= S_IDLE; else st <= S_RESP;   // advanced this clock if cpu_ce
 					end else st <= S_RAMQ;
 				end else if (c_rom && !c_we) st <= S_CHK;

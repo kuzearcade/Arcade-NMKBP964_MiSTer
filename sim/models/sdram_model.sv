@@ -28,7 +28,7 @@ module sdram_model
 	localparam CAS_LATENCY = 3;
 
 	// 16M x 16-bit = 32MB, flat, matches {ba,row,col} = 24 bits exactly.
-	reg [15:0] mem [0:16*1024*1024-1];
+	reg [15:0] mem [0:16*1024*1024-1] /*verilator public_flat_rw*/;
 
 	reg [12:0] open_row [0:3];
 

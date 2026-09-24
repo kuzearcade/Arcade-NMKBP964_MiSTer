@@ -1,7 +1,12 @@
 // M3: the core on its real memory path -- macplus_rom_hw, rtl/sdram.sv against
 // sim/models/sdram_model.sv, and a DDR3 port served by the C++ testbench
 // (latency, BUSY and bursts, image preloaded as Main_MiSTer's address= load).
-module hw_top (
+module hw_top #(
+	// COPY_BYTES < 0x1600000 (the "fast" build): the testbench preloads the SDRAM
+	// model with the image instead; the full copy is checked word for word in
+	// the normal build (MP-9 notes).
+	parameter [24:0] COPY_BYTES = 25'h1600000
+) (
 	input             clk_sys,
 	input             clk_ram,
 	input             pwr_reset,
@@ -27,8 +32,17 @@ module hw_top (
 	output            sdram_ready,
 	output     [31:0] dbg_copy_words, dbg_irq3, dbg_idle, dbg_es_writes, dbg_latch_writes, dbg_cpu_addr,
 	output     [15:0] dbg_spr_overruns,
-	output     [63:0] dbg_bg_overruns
+	output     [63:0] dbg_bg_overruns,
+	// the ROM streams, for the testbench's response check
+	output            t_spr_req, t_spr_ready, t_spr_valid,
+	output     [23:0] t_spr_addr,
+	output    [127:0] t_spr_data, t_bg_data,
+	output     [3:0]  t_bg_req, t_bg_ready, t_bg_valid,
+	output     [91:0] t_bg_addr
 );
+	assign t_spr_req = spr_req; assign t_spr_ready = spr_ready; assign t_spr_valid = spr_valid;
+	assign t_spr_addr = spr_addr; assign t_spr_data = spr_data; assign t_bg_data = bg_data;
+	assign t_bg_req = bg_req; assign t_bg_ready = bg_ready; assign t_bg_valid = bg_valid; assign t_bg_addr = bg_addr;
 	wire [15:0] SDRAM_DQ; wire [12:0] SDRAM_A; wire [1:0] SDRAM_BA;
 	wire SDRAM_DQML, SDRAM_DQMH, SDRAM_nCS, SDRAM_nWE, SDRAM_nRAS, SDRAM_nCAS, SDRAM_CLK, SDRAM_CKE;
 	sdram_model u_model (.SDRAM_CLK(SDRAM_CLK), .SDRAM_A(SDRAM_A), .SDRAM_BA(SDRAM_BA), .SDRAM_DQ(SDRAM_DQ),
@@ -56,7 +70,7 @@ module hw_top (
 	wire [91:0] bg_addr;    wire [127:0] bg_data, spr_data;
 	wire [23:0] spr_addr;
 	wire [1:0]  smp_bank;   wire [20:0] smp_word;  wire [15:0] smp_data;
-	macplus_rom_hw u_rom (
+	macplus_rom_hw #(.COPY_BYTES(COPY_BYTES)) u_rom (
 		.clk(clk_sys), .clk_ddr(clk_ram), .pwr_reset(pwr_reset), .reset(reset), .quiz(quiz),
 		.ioctl_download(ioctl_download), .ioctl_index(16'd0), .ioctl_wr(1'b0), .ioctl_addr(27'd0), .ioctl_dout(8'd0),
 		.ioctl_wait(), .rom_ready(rom_ready),
@@ -79,7 +93,7 @@ module hw_top (
 
 	wire hb, vb, hs, vs; wire [23:0] rgbf; wire [31:0] r2q;
 	macplus_core #(.CE_NUM(8'd29)) u_core (
-		.clk(clk_sys), .reset(reset | ~rom_ready | ~sdram_ready), .quiz(quiz), .pause(1'b0), .flip(1'b0),
+		.clk(clk_sys), .reset(reset | ~rom_ready | ~sdram_ready), .quiz(quiz), .pause(1'b0), .flip(1'b0), .trace_on(1'b0),
 		.inputs(inputs), .dsw(dsw),
 		.ram2_sel(1'b0), .ram2_addr(15'd0), .ram2_we(1'b0), .ram2_be(4'd0), .ram2_din(32'd0), .ram2_dout(r2q),
 		.mrom_req(mrom_req), .mrom_addr(mrom_addr), .mrom_ack(mrom_ack), .mrom_data(mrom_data),

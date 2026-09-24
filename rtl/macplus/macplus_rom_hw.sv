@@ -165,7 +165,10 @@ module macplus_rom_hw #(
 	// Accept one layer request a clock into an in-order queue; one row in
 	// flight to the DDR side at a time from this queue (the DDR side pipelines
 	// across channels); responses leave in queue order with the layer's bit.
-	reg [24:0] bq_addr [0:15];
+	// image offsets are 26 bits: the image is 62 MB (BG2 at 0x2600000, samples at
+	// 0x2E00000). At 25 bits they wrapped past 32 MB into the sprite region
+	// (M3 response check, 2026-09-24: BG2 79,210 bad rows; MP-11).
+	reg [25:0] bq_addr [0:15];
 	reg [1:0]  bq_lay  [0:15];
 	reg [3:0]  bq_wr, bq_rd;
 	wire [4:0] bq_n = {1'b0, bq_wr} - {1'b0, bq_rd};
@@ -174,8 +177,8 @@ module macplus_rom_hw #(
 	assign la[0] = bg_addr[22:0];  assign la[1] = bg_addr[45:23];
 	assign la[2] = bg_addr[68:46]; assign la[3] = bg_addr[91:69];
 	// BG layer L lives at image offset 0x1600000 + L*0x800000 (Appendix D)
-	function [24:0] bg_off(input [1:0] L, input [22:0] a);
-		bg_off = 25'h1600000 + {L, 23'd0} + {2'd0, a};
+	function [25:0] bg_off(input [1:0] L, input [22:0] a);
+		bg_off = 26'h1600000 + {1'b0, L, 23'd0} + {3'd0, a};
 	endfunction
 	reg        bg_busy;
 	reg [1:0]  bg_cur;
@@ -203,7 +206,7 @@ module macplus_rom_hw #(
 			end
 			// one in flight
 			if (!bg_busy && bq_rd != bq_wr && !bg_ack_s) begin
-				bg_ch_req <= 1'b1; bg_ch_addr <= DDR_BASE + {7'd0, bq_addr[bq_rd]}; bg_cur <= bq_lay[bq_rd];
+				bg_ch_req <= 1'b1; bg_ch_addr <= DDR_BASE + {6'd0, bq_addr[bq_rd]}; bg_cur <= bq_lay[bq_rd];
 				bq_rd <= bq_rd + 4'd1; bg_busy <= 1'b1;
 			end
 			if (bg_busy && bg_ch_req && bg_ack_s) begin
@@ -221,10 +224,10 @@ module macplus_rom_hw #(
 	// 2/3 are unmapped and read 0.
 	reg [63:0] sq_buf [0:3];
 	reg [3:0]  sq_val;
-	reg [21:0] sq_tag [0:3];      // qword address within the sample area
-	wire [24:0] s_byte = quiz ? (25'h2E00000 + {1'b0, smp_bank, smp_word, 1'b0})
-	                          : (25'h2E00000 + {3'd0, smp_bank[0], smp_word});
-	wire [21:0] s_q    = s_byte[24:3];
+	reg [22:0] sq_tag [0:3];      // qword address of the buffered line
+	wire [25:0] s_byte = quiz ? (26'h2E00000 + {2'd0, smp_bank, smp_word, 1'b0})
+	                          : (26'h2E00000 + {4'd0, smp_bank[0], smp_word});
+	wire [22:0] s_q    = s_byte[25:3];
 	wire        s_hit  = sq_val[smp_bank] && sq_tag[smp_bank] == s_q;
 	wire [63:0] s_line = sq_buf[smp_bank];
 	wire [7:0]  s_b0   = s_line[{s_byte[2:0], 3'd0} +: 8];
@@ -238,7 +241,7 @@ module macplus_rom_hw #(
 			if (!quiz && smp_bank[1]) begin smp_data <= 16'h0000; smp_ack <= 1'b1; end   // unmapped on macrossp
 			else if (s_hit && !s_busy) begin smp_data <= s_word; smp_ack <= 1'b1; end
 			else if (!s_busy && !smp_ack_s) begin
-				smp_ch_req <= 1'b1; smp_ch_addr <= DDR_BASE + {7'd0, s_byte[24:3], 3'b000}; s_busy <= 1'b1;
+				smp_ch_req <= 1'b1; smp_ch_addr <= DDR_BASE + {6'd0, s_byte[25:3], 3'b000}; s_busy <= 1'b1;
 			end
 		end
 		if (s_busy && smp_ch_req && smp_ack_s) begin

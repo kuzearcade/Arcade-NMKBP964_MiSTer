@@ -15,3 +15,14 @@ obj_dir/Vhw_top: tb.cpp hw_top.sv $(SRCS)
 		$(RTL)/third_party/fx68k/uaddrPla.sv hw_top.sv tb.cpp -o Vhw_top
 clean:
 	rm -rf obj_dir
+
+# fast build: copies one burst; run with MP_PRELOAD=1 (the testbench preloads SDRAM)
+fast: obj_fast/Vhw_top microrom.mem nanorom.mem
+obj_fast/Vhw_top: tb.cpp hw_top.sv $(SRCS)
+	verilator --cc --exe --build -O3 -j 8 -CFLAGS -O3 --x-assign fast --x-initial fast +define+SIMULATION -Wno-fatal \
+		-Wno-WIDTH -Wno-PINCONNECTEMPTY -Wno-UNOPTFLAT -Wno-LATCH -Wno-MULTIDRIVEN -Wno-CASEINCOMPLETE \
+		-Wno-IMPLICIT -Wno-SELRANGE -Wno-UNSIGNED -Wno-BLKANDNBLK -Wno-COMBDLY -Wno-CASEOVERLAP -Wno-TIMESCALEMOD \
+		--Mdir obj_fast -GCOPY_BYTES=64 --top-module hw_top -y $(RTL)/macplus -y $(RTL) -y $(RTL)/third_party/es5506 \
+		-y $(RTL)/third_party/fx68k -y ../../models \
+		$(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v $(RTL)/third_party/fx68k/fx68k.sv $(RTL)/third_party/fx68k/fx68kAlu.sv \
+		$(RTL)/third_party/fx68k/uaddrPla.sv hw_top.sv tb.cpp -o Vhw_top

@@ -196,9 +196,37 @@ The idle count on the same static screen, at each clock enable:
 | MAME | 20,114 |
 
 29/48 (about 29 MHz of TG68K microsteps) is within 0.4 % of MAME on this
-screen, and the core uses it. D3 asks for busy scenes too: the 1,500-frame
-attract run compares the idle count frame by frame against
-`~/mp_runs/mame_idle.txt` once it passes MAME's first animated frame (394).
+screen, and the core uses it for now.
+
+**The idle loop is a poor calibration lever.** Per frame, the static screen
+gives:
+
+| enable | idle iterations |
+|---|---|
+| 18/48 | 16,063 |
+| 21/48 | 16,061 |
+| 25/48 | 17,427 |
+| 29/48 | 20,196 |
+
+The loop is memory-bound: each of its accesses costs at least three fabric
+clocks whatever the enable. Below about 24/48 the enable barely changes it.
+
+The measure D3 needs is the fraction of a frame spent working, 1 - idle /
+(that setting's full-idle count). On the attract (frames 400-558, against
+MAME's frames +1) it is:
+
+| | busy frames (12) | all frames |
+|---|---|---|
+| MAME | 9.3 % | 4.7 % |
+| 18/48 | 4.8 % | 5.4 % |
+| 21/48 | 4.8 % | 5.3 % |
+| 29/48 | 4.0 % | 4.4 % |
+
+The attract is too light a load to calibrate on, and the core's work time is
+also mostly bus-bound. The calibration needs gameplay: the M2 harness is to
+get the same scripted play and cheat pokes as `macplus_play.lua`. Until then
+29/48 stands, because it matches MAME's idle count and its all-frame average
+work.
 
 ## MP-7 — The video output clock: 625 dots of 9.6 MHz per line (open, analog width)
 
@@ -283,3 +311,41 @@ pixels, so the gate can see this class now (MS1-18).
    inferred as an M10K with read-during-write bypass, putting the RAM's
    clock-to-out into the CPU's address and ALU paths.
    `AUTO_RAM_RECOGNITION OFF` on that instance makes it 512 flip-flops.
+
+## MP-11 — First board run: the DDR3 offsets were 25 bits wide, the image is 62 MB (fixed)
+
+The first bitstream on the DE10-Nano (md5 `0bcd566f...`, 2026-09-24):
+- booted: the 22 MB copy, then the Banpresto screen pixel-exact and the
+  attract with a correct text layer;
+- but the scenes built from BG layer 2 were garbage: vertical stripes and
+  broken artwork.
+
+The DDR3 image itself was not at fault. `/dev/mem` at 0x30000000 read back
+byte-identical to the local image in every region sampled.
+
+The hardware-path simulation reproduced it once it reached those scenes
+(frame 400 on). A response checker in `sim/rtl/macplus_hw` (every ROM
+response against the image, in request order, per stream) named it:
+
+| stream | bad / responses |
+|---|---|
+| BG0 | 0 / 2,486,151 |
+| BG1 | 0 / 2,486,151 |
+| BG2 | **79,210** / 2,486,151 |
+| text | 0 / 2,476,776 |
+
+The offsets from BG2 up need 26 bits: BG2 starts at 0x2600000 and the samples
+at 0x2E00000, both above 32 MB. `bg_off` and the sample address were 25 bits
+wide, so BG2 wrapped into the sprite region. That wrapped data is the
+"garbled sprites" on the board; this scene has no sprites at all, and its
+mech and starfield are layer 2. The samples wrapped too, so the board's sound
+was wrong as well. BG1 wraps above its first 2 MB, which this scene does not
+use.
+
+The reference harnesses index each region separately and cannot see an
+image-offset bug. The response checker is the gate for it now.
+
+With the offsets 26 bits wide (bitstream md5 `5bb16d69...`, timing met: the
+system clock at +0.831 ns; 33,052 ALMs, 548 / 553 M10K) the board runs the
+attract correctly: the Banpresto screen, the specification page with its
+mech, the zoomed tunnel and mech scenes, and the title screen.

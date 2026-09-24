@@ -393,7 +393,7 @@ wire [23:0] core_rgb, core_rgb_fade;
 wire signed [15:0] snd_l, snd_r;
 macplus_core #(.CE_NUM(8'd29)) core (
 	.clk(clk_sys), .reset(reset | ~rom_ready | ~sdram_ready), .quiz(quiz),
-	.pause(status[29] | hs_pause | ch_pause), .flip(status[17]),
+	.pause(status[29] | hs_pause | ch_pause), .flip(status[17]), .trace_on(1'b0),
 	.inputs(inputs), .dsw(dsw),
 	.ram2_sel(hs_access), .ram2_addr(hs_off[16:2]), .ram2_we(hs_write & hs_access), .ram2_be(4'b0001 << hs_lane),
 	.ram2_din({4{hs_din}}), .ram2_dout(ram2_dout),

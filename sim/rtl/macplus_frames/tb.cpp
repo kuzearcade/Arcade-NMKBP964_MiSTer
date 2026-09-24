@@ -9,6 +9,9 @@
 //   MP_LAT=n             graphics/sample ROM latency in clocks (default 30)
 //   MP_MLAT=n            program ROM latency (default 2)
 //   MP_WAV=file          raw 16-bit stereo PCM at 48 kHz (the ES5506 output, sampled)
+//   MP_PLAY=1            scripted play as sim/oracle/macplus_play.lua (coin at MP_PLAY_FROM,
+//                        default 600; start +60; fire, bomb and moves from +120) and, for
+//                        macrossp, its two cheat pokes each frame through the RAM back door
 #include "Vmacplus_core.h"
 #include "verilated.h"
 #include <cstdio>
@@ -38,6 +41,9 @@ int main(int argc, char **argv) {
 	                     fg = slurp(img + "/fg.bin"), smp = slurp(img + "/smp.bin");
 	std::vector<uint8_t> bg[3] = {slurp(img + "/bg0.bin"), slurp(img + "/bg1.bin"), slurp(img + "/bg2.bin")};
 	FILE *wav = getenv("MP_WAV") ? fopen(getenv("MP_WAV"), "wb") : nullptr;
+	bool play = getenv("MP_PLAY") != nullptr;
+	int F0 = env("MP_PLAY_FROM", 600);
+	int TRF = env("MP_TRACE_FRAME", -1);   // with +mptrace and a +define+MP_TRACE build
 
 	Vmacplus_core *t = new Vmacplus_core;
 	uint64_t now = 0;
@@ -53,6 +59,7 @@ int main(int argc, char **argv) {
 	int frame = 0, prevv = 0;
 	uint64_t next_audio = 0;
 	unsigned last_idle = 0, last_es = 0, last_lw = 0, last_irq = 0;
+	t->trace_on = 0;
 	t->quiz = quiz; t->pause = 0; t->flip = getenv("MP_FLIP") ? 1 : 0; t->ram2_sel = 0; t->ram2_we = 0; t->ram2_addr = 0; t->ram2_be = 0; t->ram2_din = 0;
 	t->inputs = 0xFFFFFFFF;
 	t->dsw = quiz ? 0xFFFF : 0xBFFF;            // MAME defaults (Language: English on macrossp)
@@ -105,20 +112,48 @@ int main(int argc, char **argv) {
 			int h = t->hcount, v = t->vcount;
 			if (h >= 2 && h <= 385 && v < H) fb[v * 384 + h - 2] = t->rgb;   // rgb is two pixels behind hcount (M1)
 			if (v == 0 && prevv == 255) {
+				if (play) {
+					uint32_t in = 0xFFFFFFFF;
+					int F = frame + 1;                          // the frame about to start
+					if (F >= F0 && F < F0 + 6) in &= ~(1u << 2);                 // coin 1
+					if (F >= F0 + 60 && F < F0 + 66) in &= ~(1u << 0);           // start 1
+					if (F >= F0 + 120) {
+						if ((F % 8) < 4) in &= ~(1u << 20);                      // button 1
+						if ((F % 300) < 4) in &= ~(1u << 21);                    // button 2
+						static const int mv[7][2] = {{-1,-1},{16,-1},{18,-1},{17,-1},{19,-1},{16,19},{17,18}};
+						const int *m = mv[(F / 60) % 7];
+						for (int k = 0; k < 2; k++) if (m[k] >= 0) in &= ~(1u << m[k]);
+						if (quiz) in &= ~(1u << (20 + (F / 30) % 4));
+					}
+					t->inputs = in;
+					if (!quiz && F >= F0 + 120) {
+						// the cheat pokes: pause, let the CPU block settle, write two bytes
+						t->pause = 1; for (int i = 0; i < 16; i++) tick();
+						auto poke = [&](uint32_t a, uint8_t b) {
+							uint32_t off = a - 0xF00000; int lane = 3 - (off & 3);
+							t->ram2_sel = 1; t->ram2_addr = off >> 2; t->ram2_be = 1u << lane;
+							t->ram2_din = (uint32_t)b << (8 * lane); t->ram2_we = 1; tick();
+							t->ram2_we = 0; tick(); t->ram2_sel = 0;
+						};
+						poke(0xF173C1, 0x04); poke(0xF07183, 0x0D);
+						tick(); t->pause = 0;
+					}
+				}
 				if (fdir && frame >= FROM) {
 					char fn[512]; snprintf(fn, sizeof fn, "%s/f%05d.raw", fdir, frame);
 					FILE *f = fopen(fn, "wb"); fwrite(fb.data(), 4, 384 * H, f); fclose(f);
 				}
 				if (frame % EVERY == 0) {
 					int nb = 0; for (int i = 0; i < 384 * H; i++) nb += (fb[i] & 0xFFFFFF) != 0;
-					printf("f=%d nonblack=%d irq3=%u(+%u) iack3=%u idle=+%u es_w=+%u latch_w=+%u latch_r=%u es_irq=%u spr_over=%u bg_over=%llx cpu=%06x\n",
-					       frame, nb, t->dbg_irq3, t->dbg_irq3 - last_irq, t->dbg_iack3, t->dbg_idle - last_idle,
+					printf("f=%d work_us=%.1f nonblack=%d irq3=%u(+%u) iack3=%u idle=+%u es_w=+%u latch_w=+%u latch_r=%u es_irq=%u spr_over=%u bg_over=%llx cpu=%06x\n",
+					       frame, t->dbg_work / 48.0, nb, t->dbg_irq3, t->dbg_irq3 - last_irq, t->dbg_iack3, t->dbg_idle - last_idle,
 					       t->dbg_es_writes - last_es, t->dbg_latch_writes - last_lw, t->dbg_latch_reads, t->dbg_es_irq,
 					       t->dbg_spr_overruns, (unsigned long long)t->dbg_bg_overruns, t->dbg_cpu_addr & 0xFFFFFF);
 					fflush(stdout);
 					last_idle = t->dbg_idle; last_es = t->dbg_es_writes; last_lw = t->dbg_latch_writes; last_irq = t->dbg_irq3;
 				}
 				frame++;
+				t->trace_on = (frame == TRF);
 			}
 			prevv = v;
 		}
