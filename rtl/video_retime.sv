@@ -41,7 +41,16 @@ module video_retime #(
 	// Lines per frame. 278 is the NMK16 boards' raster; Sand Scorpion's is
 	// 262 (rtl/kaneko/video_timing_sandscrp.sv). The visible window stays
 	// rows 16..239 on both, which is what tall240 alters, not this.
-	parameter integer VTOTAL_P = 278
+	parameter integer VTOTAL_P = 278,
+	// Arcade-NMKMacPlus_MiSTer: the vertical window and the vsync offset were
+	// fixed at the NMK16 geometry (rows 16..239, tall240 rows 8..247, vsync 24
+	// lines into the blank). They are parameters here; the defaults keep that
+	// geometry. MacPlus passes rows 0..239 (the second set, selected by the
+	// same tall240 input, 0..223 for quizmoon) and a vsync 4 lines into a
+	// 16-line blank.
+	parameter [9:0] VS_A = 10'd16, VE_A = 10'd240,
+	parameter [9:0] VS_B = 10'd8,  VE_B = 10'd248,
+	parameter [9:0] VS_REL = 10'd24
 ) (
 	// write side — the core's raster
 	input         clk_w,
@@ -93,8 +102,8 @@ module video_retime #(
 	/* verilator lint_off WIDTHTRUNC */
 	localparam [9:0] VTOTAL = VTOTAL_P;
 	/* verilator lint_on WIDTHTRUNC */
-	wire [9:0] v_start = tall240 ? 10'd8   : 10'd16;
-	wire [9:0] v_end   = tall240 ? 10'd248 : 10'd240;   // exclusive: the first vblank line
+	wire [9:0] v_start = tall240 ? VS_B : VS_A;
+	wire [9:0] v_end   = tall240 ? VE_B : VE_A;   // exclusive: the first vblank line
 	wire [9:0] v_blank = VTOTAL - v_end;                // lines of vblank (30 / 38)
 
 	// ------------------------------------------------------------------
@@ -125,8 +134,8 @@ module video_retime #(
 	// per session, but the read side must not sample a metastable value).
 	reg  [1:0] tall_sync = 2'b00;
 	always @(posedge clk_r) tall_sync <= {tall_sync[0], tall240};
-	wire [9:0] v_start_r = tall_sync[1] ? 10'd8   : 10'd16;
-	wire [9:0] v_end_r   = tall_sync[1] ? 10'd248 : 10'd240;
+	wire [9:0] v_start_r = tall_sync[1] ? VS_B : VS_A;
+	wire [9:0] v_end_r   = tall_sync[1] ? VE_B : VE_A;
 	wire [9:0] v_blank_r = VTOTAL - v_end_r;
 	wire [9:0] r_x0 = m7 ? R_X0_7 : R_X0_8;
 	wire [9:0] r_ht = m7 ? R_HT_7 : R_HT_8;
@@ -138,7 +147,7 @@ module video_retime #(
 	// (rtl/crt_chain.sv), which shifts sync downstream of this module.
 	wire [9:0] hs_start  = m7 ? R_HS_7 : R_HS_8;
 	wire [9:0] hs_width  = m7 ? R_HW_7 : R_HW_8;
-	wire [9:0] vs_rel    = 10'd24;
+	wire [9:0] vs_rel    = VS_REL;
 
 	reg        running = 1'b0;
 	reg [12:0] hclk;              // clk_r within the line (13 bits: LINE_CLKS may be 6144)

@@ -108,19 +108,23 @@ stages), chosen by that gate. The finding is recorded as MAME behaviour
 versus the board: MAME's 2-stage comment was tuned by eye against its own
 render instant.
 
-## MP-5 — M1: the video RTL against MAME's pictures (closed for the captures so far)
+## MP-5 — M1: the video RTL against MAME's pictures (closed: 900 / 900)
 
 `sim/rtl/video_state` loads a capture state through the CPU port, lets two
 vblank copies carry the sprite list into `old2`, serves ROM rows with a set
 latency (one BG response a clock, as the DDR3 arbiter will), and compares the
 third frame with MAME picture F+1 (MP-1).
 
-- Every 10th frame of the macrossp scripted-play capture: **540 / 540
-  pixel-exact**, at 40 clocks of ROM latency. They cover 46-106 sprites on
-  screen, alpha sprites, zoomed sprites and zoomed BG layers.
-- The attract capture is also exact so far (96 of 96).
-- Line budget: the sprite line renderer peaks at 1,018 of 3,125 clocks (18
-  sprites on the line); BG lines take 907-976 clocks. There are 0 overruns.
+Every 10th frame of each capture, at 40 clocks of ROM latency:
+
+| capture | pixel-exact | non-blank among them |
+|---|---|---|
+| macrossp scripted play (46-106 sprites, alpha, zoomed sprites, zoomed BG) | **540 / 540** | 535 |
+| macrossp attract | **180 / 180** | 175 |
+| quizmoon attract (up to 377 sprites) | **180 / 180** | 175 |
+
+The sprite line renderer peaks at 1,451 of 3,125 clocks (quizmoon: 1,267),
+and BG lines take 907-976 clocks. There are 0 overruns anywhere.
 
 Two bugs were found by this gate, neither visible to the Python model:
 
@@ -140,7 +144,7 @@ The harness also measured the output latency: `rgb` is two pixels behind
 `hcount` (the MS1-59 alignment). `sim/rtl/macplus_frames` uses the same
 offset.
 
-## MP-6 — The CPU's bus path is 2.4x slower than MAME's 68020 (open, D3)
+## MP-6 — The CPU's bus path was 2.4x slower than MAME's 68020 (fixed; D3 calibration in progress)
 
 The whole board boots from reset in `sim/rtl/macplus_frames`:
 - TG68K runs the game and IRQ3 is acknowledged every frame;
@@ -171,3 +175,111 @@ To be done before the enable can be tuned:
 
 Then the enable is set so the idle count matches MAME across busy scenes, not
 just this static one.
+
+**Fix: `rtl/macplus/macplus_cpu_bus.sv`.** TG68K, a lean adapter derived from
+ITech32's, main RAM and a 4 KB program-ROM cache (256 lines of 16 bytes, filled
+from the ROM port) in one module:
+- a RAM write takes 2 clocks;
+- a RAM read or cache hit takes 3;
+- video, I/O, the latch and cache misses keep the board handshake.
+
+The idle count on the same static screen, at each clock enable:
+
+| enable (of 48 MHz) | idle iterations per frame |
+|---|---|
+| 25/48 | ~17,300 |
+| 28/48 | ~19,400 |
+| **29/48** | **20,198** |
+| 30/48 | ~20,800 |
+| 32/48 | ~21,600 |
+| 48/48 | ~22,900 |
+| MAME | 20,114 |
+
+29/48 (about 29 MHz of TG68K microsteps) is within 0.4 % of MAME on this
+screen, and the core uses it. D3 asks for busy scenes too: the 1,500-frame
+attract run compares the idle count frame by frame against
+`~/mp_runs/mame_idle.txt` once it passes MAME's first animated frame (394).
+
+## MP-7 — The video output clock: 625 dots of 9.6 MHz per line (open, analog width)
+
+MAME's raster is 512 x 256 at exactly 60 Hz, a 7.864 MHz dot clock, which is
+3,125 clk_sys at 48 MHz or 6,250 clk_ram at 96 MHz per line. `video_retime`
+re-times the picture onto clk_ram with an integer number of clocks per dot
+and needs dots x divider = clocks per line exactly. The exact fits are
+625 x 10 and 1,250 x 5, and the retimer does not double pixels, so the
+output is **625 dots of 9.6 MHz** with the picture in dots 0..383.
+- Line and frame are exactly MAME's (15.36 kHz, 60.00 Hz, 256 lines), so the
+  scaler and HDMI see a correct 384 x 240 (224) picture.
+- On an analog CRT the active width is 40 us of a 65 us line instead of
+  MAME's 48.8 us: about 18 % narrower. CRT Adjust's H-Size widens it.
+- `video_retime` gained parameters for its vertical window and vsync offset
+  (it had the NMK16 rows 16..239 and a vsync 24 lines into the blank
+  hard-coded, which on a 16-line blank would never fire). The defaults keep
+  the siblings' geometry.
+
+OSD Flip currently uses `screen_rotate`'s framebuffer flip. NMK-21 moved the
+siblings to a flip inside the core, so that it reaches the analog output and
+does not force the framebuffer; that is still to do here.
+
+## MP-8 — The BG path keeps one DDR3 row in flight (open, measure in M3)
+
+`macplus_rom_hw`'s BG front end sends one tile row at a time across the
+48-to-96 MHz handshake, with two-flop synchronisers each way. At about
+25 clk_sys per row that is fine unzoomed (75 rows a line, ~1,900 of 3,125
+clocks). The zoomed scenes measured in MP-3 need up to ~121 rows a line,
+which is close to the limit. The DDR3 side already pipelines up to 8 reads;
+the front end needs a queue across the crossing to use them. The M3 run
+decides with the BG overrun counters.
+
+## MP-9 — The BG engine paired a column with its neighbour's tile word after a stall (fixed; M1 now injects stalls)
+
+The first hardware-path run (`sim/rtl/macplus_hw`: `macplus_rom_hw`, the real
+`sdram.sv` against its model, and a DDR3 model) did the following:
+- copied the 22 MB SDRAM part in 3.52 s of board time;
+- booted, with sound traffic identical to the reference sim (936 ES5506
+  writes by frame 10 in both).
+
+But its picture differed from MAME by 9,665 pixels on the first static
+screen, where the reference sim was exact. The difference was exactly **one
+16-pixel tile**: M3's pixel x was MAME's pixel x + 16, with 0 differences at
+that offset. Only layer 0 draws that screen (the model, with each layer
+removed in turn), so the fault was on the DDR3 BG path.
+
+Cause, in `macplus_bgline`'s fetch stage:
+- The two-stage VRAM read pipeline froze its valid flags while a ROM request
+  waited for `rom_ready`.
+- The VRAM's registered output did not freeze; it kept sampling the next
+  column's address.
+- After a stall, column C was issued with column C+1's tile word.
+
+The reference harnesses accept every request on the clock it is raised, so
+they never stall. Behind `macplus_rom_hw` `ready` comes a clock later.
+
+Fix: the tile word is latched on the clock it arrives, independent of the
+request stage, with one VRAM read in flight.
+
+Gate change: the M1 harness takes `MP_RDY=n` (accept only every n-th clock).
+With the fix, frames 900, 2250 and 4500 are exact at n = 1, 3 and 7. The
+pre-fix engine passes at n = 1 and fails at n = 3 with **62,293** differing
+pixels, so the gate can see this class now (MS1-18).
+
+## MP-10 — First full compiles: M10K duplication and two timing faults (fixed)
+
+1. **M10K 565 of 553 (estimated).** Every VRAM lane, line-zoom lane and
+   sprite-RAM CPU lane was built twice: a CPU read, a CPU write and an
+   engine read in one always block cannot map onto one M10K pair. That is
+   NMK-10 again. Port A (the CPU's read and write) now has its own always
+   block and port B (the engine) another, which is Quartus's
+   true-dual-port template. The line-zoom RAMs are MLAB. Result: **550 of
+   553**, which fits but with 3 blocks to spare.
+2. **Main RAM with two write ports** (CPU and back door) in two always blocks
+   was not inferred at all, which cost a megabit of registers. It now has
+   one muxed port, as MS1Z's work RAM does: the back-door users only drive
+   it with the CPU paused.
+3. **Setup -32 ns:** the sprite engine's `0x100000 / dst` was a
+   combinational 21-bit divider fed straight from the `old2` RAM (51 ns).
+   It is now a 64-entry table read from a registered size, one state later.
+4. **Setup -10.8 ns inside TG68K:** its asynchronous-read register file was
+   inferred as an M10K with read-during-write bypass, putting the RAM's
+   clock-to-out into the CPU's address and ALU paths.
+   `AUTO_RAM_RECOGNITION OFF` on that instance makes it 512 flip-flops.

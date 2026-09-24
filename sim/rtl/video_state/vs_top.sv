@@ -29,7 +29,7 @@ module vs_top (
 		.hcount(hcount), .vcount(vcount), .hblank(hb), .vblank(vb), .hsync(hs), .vsync(vs),
 		.vtick(vtick), .vblank_start(vblank_start), .frame_start(fs));
 	wire [23:0] rgbf; wire [11:0] pen;
-	macplus_video u_v (.clk(clk), .reset(reset), .quiz(quiz),
+	macplus_video u_v (.clk(clk), .reset(reset), .quiz(quiz), .flip(1'b0),
 		.ce_pix(ce_pix), .hcount(hcount), .vcount(vcount), .vtick(vtick), .vblank_start(vblank_start),
 		.cpu_sel(cpu_sel), .cpu_addr(cpu_addr), .cpu_we(cpu_we), .cpu_be(cpu_be), .cpu_din(cpu_din),
 		.cpu_dout(cpu_dout), .cpu_ack(cpu_ack), .fade(8'hFF), .spr_rebuild(1'b0),

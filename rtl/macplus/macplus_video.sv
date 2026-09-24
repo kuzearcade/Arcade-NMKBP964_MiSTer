@@ -27,6 +27,7 @@ module macplus_video #(
 	input             clk,
 	input             reset,
 	input             quiz,
+	input             flip,          // OSD Flip: rot180 of the finished frame (NMK-21, MS1-13)
 	// raster
 	input             ce_pix,
 	input      [8:0]  hcount,
@@ -83,29 +84,35 @@ module macplus_video #(
 	// each VRAM: four byte-lane arrays; port A CPU, port B the layer engine
 	wire [11:0] eng_vaddr [0:3];
 	wire [6:0]  eng_lzaddr [0:3];
-	reg  [31:0] vram_q [0:3], lz_q [0:3], vram_cq [0:3], lz_cq [0:3];
+	reg  [31:0] vram_q [0:3], vram_cq [0:3];
+	reg  [31:0] lz_q [0:3], lz_cq [0:3];
 	reg  [31:0] vr [0:3][0:2];
 	genvar g;
 	generate for (g = 0; g < 4; g = g + 1) begin : lay
 		reg [7:0] v0 [0:4095], v1 [0:4095], v2 [0:4095], v3 [0:4095];
-		reg [7:0] z0 [0:127],  z1 [0:127],  z2 [0:127],  z3 [0:127];
 		wire wv = cpu_sel && cpu_we && v_vram && layer == g;
 		wire wz = cpu_sel && cpu_we && v_lz   && layer == g;
+		// Quartus's true-dual-port template, one array per byte lane: port A is
+		// the CPU (write and read at one address, one always block), port B the
+		// layer engine's read in a block of its own. Written as one block with
+		// both reads, each lane was built twice (quartus_map, 2026-09-24; NMK-10).
+		always @(posedge clk) begin if (wv & cpu_be[0]) v0[lw[11:0]] <= cpu_din[7:0];   vcq0 <= v0[lw[11:0]]; end
+		always @(posedge clk) begin if (wv & cpu_be[1]) v1[lw[11:0]] <= cpu_din[15:8];  vcq1 <= v1[lw[11:0]]; end
+		always @(posedge clk) begin if (wv & cpu_be[2]) v2[lw[11:0]] <= cpu_din[23:16]; vcq2 <= v2[lw[11:0]]; end
+		always @(posedge clk) begin if (wv & cpu_be[3]) v3[lw[11:0]] <= cpu_din[31:24]; vcq3 <= v3[lw[11:0]]; end
+		always @(posedge clk) vq0 <= v0[eng_vaddr[g]];
+		always @(posedge clk) vq1 <= v1[eng_vaddr[g]];
+		always @(posedge clk) vq2 <= v2[eng_vaddr[g]];
+		always @(posedge clk) vq3 <= v3[eng_vaddr[g]];
+		reg [7:0] vcq0, vcq1, vcq2, vcq3, vq0, vq1, vq2, vq3;
+		always @(*) begin vram_cq[g] = {vcq3, vcq2, vcq1, vcq0}; vram_q[g] = {vq3, vq2, vq1, vq0}; end
+		// line zoom: 128 x 32 per layer, too small for an M10K each; MLAB
+		(* ramstyle = "MLAB" *) reg [31:0] zm [0:127];
 		always @(posedge clk) begin
-			if (wv & cpu_be[0]) v0[lw[11:0]] <= cpu_din[7:0];
-			if (wv & cpu_be[1]) v1[lw[11:0]] <= cpu_din[15:8];
-			if (wv & cpu_be[2]) v2[lw[11:0]] <= cpu_din[23:16];
-			if (wv & cpu_be[3]) v3[lw[11:0]] <= cpu_din[31:24];
-			vram_cq[g] <= {v3[lw[11:0]], v2[lw[11:0]], v1[lw[11:0]], v0[lw[11:0]]};
-			vram_q[g]  <= {v3[eng_vaddr[g]], v2[eng_vaddr[g]], v1[eng_vaddr[g]], v0[eng_vaddr[g]]};
-		end
-		always @(posedge clk) begin
-			if (wz & cpu_be[0]) z0[lw[6:0]] <= cpu_din[7:0];
-			if (wz & cpu_be[1]) z1[lw[6:0]] <= cpu_din[15:8];
-			if (wz & cpu_be[2]) z2[lw[6:0]] <= cpu_din[23:16];
-			if (wz & cpu_be[3]) z3[lw[6:0]] <= cpu_din[31:24];
-			lz_cq[g] <= {z3[lw[6:0]], z2[lw[6:0]], z1[lw[6:0]], z0[lw[6:0]]};
-			lz_q[g]  <= {z3[eng_lzaddr[g]], z2[eng_lzaddr[g]], z1[eng_lzaddr[g]], z0[eng_lzaddr[g]]};
+			if (wz) zm[lw[6:0]] <= {cpu_be[3] ? cpu_din[31:24] : zm[lw[6:0]][31:24], cpu_be[2] ? cpu_din[23:16] : zm[lw[6:0]][23:16],
+			                        cpu_be[1] ? cpu_din[15:8]  : zm[lw[6:0]][15:8],  cpu_be[0] ? cpu_din[7:0]   : zm[lw[6:0]][7:0]};
+			lz_cq[g] <= zm[lw[6:0]];
+			lz_q[g]  <= zm[eng_lzaddr[g]];
 		end
 		integer r;
 		always @(posedge clk) begin
@@ -126,14 +133,20 @@ module macplus_video #(
 	// sprline lesson; measured here as a latency-dependent tear before the fix).
 	wire [8:0] vnext = (vcount == 9'd254) ? 9'd0 : (vcount == 9'd255) ? 9'd1 : vcount + 9'd2;
 	wire       lstart = vtick && vnext < vvis;
-	wire [7:0] tline  = vnext[7:0];
+	// Flip: the engines draw the mirrored source line into the target line's
+	// buffer half, and the display reads each buffer mirrored. Whole lines are
+	// drawn ahead of the beam, so there is no per-pixel prefetch whose
+	// direction a mirror could reverse (NMK-21b).
+	wire [8:0] vsrc   = flip ? (vvis - 9'd1 - vnext) : vnext;
+	wire [7:0] tline  = vsrc[7:0];
 
 	// ================================================================ layers
 	wire [12:0] l_q [0:3];
 	wire [1:0]  l_pri [0:3];
 	wire [3:0]  l_busy;
-	wire [8:0]  rd_x = hcount;
-	wire        rd_half = vcount[0];
+	wire [8:0]  rd_x = (flip && hcount < 9'd384) ? (9'd383 - hcount) : hcount;
+	wire [8:0]  vdisp = flip ? (vvis - 9'd1 - vcount) : vcount;
+	wire        rd_half = vdisp[0];     // the half the source line was drawn into
 	wire [14:0] bg_mask [0:2];
 	assign bg_mask[0] = 15'h7FFF;
 	assign bg_mask[1] = quiz ? 15'h3FFF : 15'h7FFF;

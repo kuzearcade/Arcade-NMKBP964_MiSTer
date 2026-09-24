@@ -74,7 +74,7 @@ module macplus_bgline #(
 	reg        fetching;
 	reg [15:0] cyc;
 	reg [1:0]  mode;
-	reg [1:0]  pri [0:1];
+	reg [1:0]  pri0, pri1;     // this layer's priority, per line-buffer half
 
 	assign lz_addr = y[7:1];
 	wire zoom = !TEXT && vr2[31:28] == 4'hE;
@@ -109,7 +109,7 @@ module macplus_bgline #(
 	always @(posedge clk) begin
 		if (lb_we) lb[lb_wa] <= lb_wd;
 		rd_q <= lb[{rd_half, rd_x}];
-		pri_out <= pri[rd_half];
+		pri_out <= rd_half ? pri1 : pri0;
 	end
 
 	// ---------------------------------------------------------------- draw stage (cache_q belongs to d_*)
@@ -127,20 +127,28 @@ module macplus_bgline #(
 	                         : (12'h800 + {1'b0, cc[4:0], 6'd0} + {4'd0, px});
 
 	// ---------------------------------------------------------------- fetch stage
-	reg         f_v1, f_v;         // f_v: vram_q holds the tile word of column f_tc
-	reg  [5:0]  f_tc1, f_tc;       // (vram_addr is registered, then the RAM: two clocks)
-	wire [14:0] code_m = vram_q[14:0] & code_mask;
-	wire        f_zero = TEXT && ({1'b0, vram_q[14:0]} >= code_limit);
-	wire [3:0]  frow   = sy[3:0] ^ ((!TEXT && vram_q[31]) ? 4'hF : 4'h0);
-	wire [6:0]  f_col  = TEXT ? vram_q[23:17]
-	                   : (mode == 2'b10) ? {2'd0, vram_q[19:17], 2'b00}
-	                   : (mode == 2'b01) ? {2'd0, vram_q[21:17]} : 7'd0;
-	wire        stall  = rom_req && !rom_ready;
+	// One VRAM read in flight. Its word is LATCHED the clock it arrives, whether
+	// or not a ROM request is waiting: the RAM's output register does not freeze
+	// while this FSM does, and consuming it after a stall paired column C with
+	// column C+1's tile word -- the whole layer one tile to the left, seen only
+	// on the hardware path, where `rom_ready` comes a clock after the request
+	// (M3, 2026-09-24; the NMK-21b class: an address trace could not see it).
+	reg         rd_busy, rd_t1, rd_t2;
+	reg  [5:0]  rd_tc;
+	reg         w_full;               // f_word holds column w_tc's tile word
+	reg  [31:0] f_word;
+	reg  [5:0]  w_tc;
+	wire [14:0] code_m = f_word[14:0] & code_mask;
+	wire        f_zero = TEXT && ({1'b0, f_word[14:0]} >= code_limit);
+	wire [3:0]  frow   = sy[3:0] ^ ((!TEXT && f_word[31]) ? 4'hF : 4'h0);
+	wire [6:0]  f_col  = TEXT ? f_word[23:17]
+	                   : (mode == 2'b10) ? {2'd0, f_word[19:17], 2'b00}
+	                   : (mode == 2'b01) ? {2'd0, f_word[21:17]} : 7'd0;
 
 	always @(posedge clk) begin
 		lb_we <= 1'b0;
 		if (reset) begin
-			st <= S_IDLE; busy <= 1'b0; rom_req <= 1'b0; d_v <= 1'b0; f_v <= 1'b0; f_v1 <= 1'b0;
+			st <= S_IDLE; busy <= 1'b0; rom_req <= 1'b0; d_v <= 1'b0; rd_busy <= 1'b0; rd_t1 <= 1'b0; rd_t2 <= 1'b0; w_full <= 1'b0;
 			q_wr <= 6'd0; q_rd <= 6'd0;
 			dbg_unknown <= 16'd0; dbg_max_cycles <= 16'd0; dbg_overruns <= 16'd0;
 		end else begin
@@ -160,39 +168,47 @@ module macplus_bgline #(
 			S_SETUP2: begin
 				cx0 <= cx0_n; cx <= cx0_n; incx <= incx_n; sy <= sy_n;
 				mode <= vr0[11:10];
-				pri[half] <= TEXT ? 2'd3 : vr0[15:14];
+				if (half) pri1 <= TEXT ? 2'd3 : vr0[15:14]; else pri0 <= TEXT ? 2'd3 : vr0[15:14];
 				need <= 64'd0; x <= 9'd0; st <= S_MARK;
 			end
 			S_MARK: begin
 				need[tc] <= 1'b1;
 				cx <= cx + incx;
 				x <= x + 9'd1;
-				if (x == 9'd383) begin fc <= 6'd0; fetching <= 1'b1; f_v <= 1'b0; f_v1 <= 1'b0; st <= S_FETCH; end
+				if (x == 9'd383) begin
+					fc <= 6'd0; fetching <= 1'b1; rd_busy <= 1'b0; rd_t1 <= 1'b0; rd_t2 <= 1'b0; w_full <= 1'b0;
+					st <= S_FETCH;
+				end
 			end
-			S_FETCH: if (!stall) begin
-				// stage 2: the tile word read last clock becomes a ROM request
-				f_v <= 1'b0;
-				if (f_v) begin
-					c_col[f_tc] <= f_col;
-					c_fx[f_tc] <= !TEXT && vram_q[30];
-					c_zero[f_tc] <= f_zero;
+			S_FETCH: begin
+				// the tile word arrives two clocks after its address (address
+				// register, then the RAM); latch it whatever the request stage does
+				rd_t1 <= 1'b0; rd_t2 <= rd_t1;
+				if (rd_t2) begin f_word <= vram_q; w_tc <= rd_tc; w_full <= 1'b1; rd_busy <= 1'b0; end
+				// a latched word becomes a ROM request when the request slot is free
+				if (w_full && (!rom_req || rom_ready)) begin
+					w_full <= 1'b0;
+					c_col[w_tc] <= f_col;
+					c_fx[w_tc] <= !TEXT && f_word[30];
+					c_zero[w_tc] <= f_zero;
 					if (!f_zero) begin
 						rom_req <= 1'b1;
 						rom_addr <= TEXT ? {1'b0, code_m, frow, 3'b000} : {code_m, frow, 4'b0000};
-						q_tc[q_wr] <= f_tc; q_wr <= q_wr + 6'd1;
+						q_tc[q_wr] <= w_tc; q_wr <= q_wr + 6'd1;
 					end
 				end
-				// the RAM's clock
-				f_v <= f_v1; f_tc <= f_tc1; f_v1 <= 1'b0;
-				// stage 1: address the next needed tile word
-				if (fetching) begin
-					if (need[fc]) begin
-						vram_addr <= {sy[9:4], fc}; f_v1 <= 1'b1; f_tc1 <= fc;
+				// read the next needed column's tile word: one in flight, and only
+				// when the word slot will be free by the time it arrives
+				if (!rd_busy && !rd_t1 && !rd_t2 && (!w_full || (!rom_req || rom_ready))) begin
+					if (fetching) begin
+						if (need[fc]) begin
+							vram_addr <= {sy[9:4], fc}; rd_t1 <= 1'b1; rd_busy <= 1'b1; rd_tc <= fc;
+						end
+						fc <= fc + 6'd1;
+						if (fc == 6'd63) fetching <= 1'b0;
 					end
-					fc <= fc + 6'd1;
-					if (fc == 6'd63) fetching <= 1'b0;
-				end else if (!f_v && !f_v1)
-					st <= S_WAIT;
+				end
+				if (!fetching && !rd_busy && !rd_t1 && !rd_t2 && !w_full) st <= S_WAIT;
 			end
 			S_WAIT: if (!rom_req && q_rd == q_wr && !rom_valid) begin
 				cx <= cx0; x <= 9'd0; st <= S_DRAW;

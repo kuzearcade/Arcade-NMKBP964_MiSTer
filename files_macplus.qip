@@ -1,0 +1,33 @@
+# Arcade-NMKMacPlus_MiSTer source list. Edit HERE, not in the .qsf: Quartus
+# appends a copy of what this file sources to the end of the .qsf on every
+# quartus_map run; revert that before committing (MS1Z lesson).
+set_global_assignment -name SYSTEMVERILOG_FILE MacPlus.sv
+set_global_assignment -name VERILOG_FILE rtl/pll.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video_retime.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/crt_adjust/rtl/crt_vsize.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/crt_adjust/rtl/crt_adjust.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/crt_chain.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_core.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_timing.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_main.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_cpu_bus.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_sound.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_bgline.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_sprites.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/macplus/macplus_rom_hw.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram_req.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram_arb.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rom_cache_n.sv
+set_global_assignment -name VHDL_FILE rtl/third_party/tg68k/TG68K_Pack.vhd
+set_global_assignment -name VHDL_FILE rtl/third_party/tg68k/TG68K_ALU.vhd
+set_global_assignment -name VHDL_FILE rtl/third_party/tg68k/TG68KdotC_Kernel.vhd
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/es5506/itech32_es5506.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/es5506/itech32_es5506_par.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/fx68k/fx68k.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/fx68k/fx68kAlu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/fx68k/uaddrPla.sv
+set_global_assignment -name VERILOG_FILE rtl/third_party/hiscore/hiscore.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cheats.sv
+set_global_assignment -name SDC_FILE NMKMacPlus.sdc

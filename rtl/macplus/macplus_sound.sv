@@ -13,9 +13,11 @@
 //
 // ES5506 sample space: four banks of 2M words. The core maps a bank and word
 // to its image; `smp_*` is the held request/ack the module expects.
-// Output: the ES5506's channel 0, 20-bit stereo. MAME routes it at a gain of
-// 1.6; the level is measured against MAME in M2 before a gain is chosen
-// (MS1Z-13), so this stage is a plain 20-to-16-bit normalisation for now.
+// Output: the ES5506's channel 0, 20-bit stereo, at MAME's level. MAME puts
+// the sample out as sample / 2^19 (es5506.cpp put_int_clamp(..., 1 << 19)),
+// routes it at 1.6, and a 16-bit WAV is that times 32768: sample * 0.1. Here
+// (sample * 205) >> 11 = sample * 0.10010, saturated to 16 bits (the level is
+// then confirmed against MAME's WAV, MS1Z-13).
 module macplus_sound (
 	input             clk,
 	input             reset,
@@ -165,6 +167,13 @@ module macplus_sound (
 		.scan_voice(), .engine_busy());
 	assign smp_word = smp_addr_b[21:1];
 
+	function signed [15:0] gain(input signed [19:0] v);
+		reg signed [31:0] p;
+		begin
+			p = ($signed(v) * 32'sd205) >>> 11;
+			gain = (p > 32'sd32767) ? 16'sh7FFF : (p < -32'sd32768) ? 16'sh8000 : p[15:0];
+		end
+	endfunction
 	reg es_irq_d;
 	always @(posedge clk) begin
 		es_irq_d <= es_irq;
@@ -173,6 +182,6 @@ module macplus_sound (
 			if (es_req && es_ack && !eRWn) dbg_es_writes <= dbg_es_writes + 32'd1;
 			if (es_irq && !es_irq_d) dbg_es_irq <= dbg_es_irq + 32'd1;
 		end
-		if (es_strobe) begin snd_l <= es_l[19:4]; snd_r <= es_r[19:4]; end
+		if (es_strobe) begin snd_l <= gain(es_l); snd_r <= gain(es_r); end
 	end
 endmodule

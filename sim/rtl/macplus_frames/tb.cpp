@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
 	int frame = 0, prevv = 0;
 	uint64_t next_audio = 0;
 	unsigned last_idle = 0, last_es = 0, last_lw = 0, last_irq = 0;
-	t->quiz = quiz; t->pause = 0;
+	t->quiz = quiz; t->pause = 0; t->flip = getenv("MP_FLIP") ? 1 : 0; t->ram2_sel = 0; t->ram2_we = 0; t->ram2_addr = 0; t->ram2_be = 0; t->ram2_din = 0;
 	t->inputs = 0xFFFFFFFF;
 	t->dsw = quiz ? 0xFFFF : 0xBFFF;            // MAME defaults (Language: English on macrossp)
 	t->reset = 1;

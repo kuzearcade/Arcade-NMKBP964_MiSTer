@@ -40,7 +40,7 @@ module macplus_sprites #(
 	input             cpu_we,
 	input      [3:0]  cpu_be,
 	input      [31:0] cpu_din,
-	output reg [31:0] cpu_dout,
+	output reg [31:0] cpu_dout,     // registered (the lane RAMs' outputs)
 	// frame control
 	input             copy,          // one clock at vblank start
 	input             rebuild,       // recompute the extent table from old2
@@ -68,14 +68,17 @@ module macplus_sprites #(
 	reg  [7:0]  live0 [0:3071], live1 [0:3071], live2 [0:3071], live3 [0:3071];
 	reg  [11:0] live_ra;
 	reg  [31:0] live_q;
-	always @(posedge clk) begin
-		if (cpu_we & cpu_be[0]) live0[cpu_addr] <= cpu_din[7:0];
-		if (cpu_we & cpu_be[1]) live1[cpu_addr] <= cpu_din[15:8];
-		if (cpu_we & cpu_be[2]) live2[cpu_addr] <= cpu_din[23:16];
-		if (cpu_we & cpu_be[3]) live3[cpu_addr] <= cpu_din[31:24];
-	end
-	always @(posedge clk) cpu_dout <= {live3[cpu_addr], live2[cpu_addr], live1[cpu_addr], live0[cpu_addr]};
-	always @(posedge clk) live_q   <= {live3[live_ra], live2[live_ra], live1[live_ra], live0[live_ra]};
+	// true-dual-port per lane: port A the CPU (write + read), port B the copy read
+	reg  [7:0]  cq0, cq1, cq2, cq3, lq0, lq1, lq2, lq3;
+	always @(posedge clk) begin if (cpu_we & cpu_be[0]) live0[cpu_addr] <= cpu_din[7:0];   cq0 <= live0[cpu_addr]; end
+	always @(posedge clk) begin if (cpu_we & cpu_be[1]) live1[cpu_addr] <= cpu_din[15:8];  cq1 <= live1[cpu_addr]; end
+	always @(posedge clk) begin if (cpu_we & cpu_be[2]) live2[cpu_addr] <= cpu_din[23:16]; cq2 <= live2[cpu_addr]; end
+	always @(posedge clk) begin if (cpu_we & cpu_be[3]) live3[cpu_addr] <= cpu_din[31:24]; cq3 <= live3[cpu_addr]; end
+	always @(posedge clk) lq0 <= live0[live_ra];
+	always @(posedge clk) lq1 <= live1[live_ra];
+	always @(posedge clk) lq2 <= live2[live_ra];
+	always @(posedge clk) lq3 <= live3[live_ra];
+	always @(*) begin cpu_dout = {cq3, cq2, cq1, cq0}; live_q = {lq3, lq2, lq1, lq0}; end
 
 	// old: 3,072 x 32 (STAGES=2 only)
 	reg  [31:0] old [0:3071];
@@ -214,8 +217,14 @@ module macplus_sprites #(
 	end
 	assign rd_q = {occ_q, lb_q[14:0]};
 
-	function [20:0] recip(input [6:0] d);           // 0x100000 / d
-		recip = (d == 7'd0) ? 21'd0 : (21'h100000 / {14'd0, d});
+	// 0x100000 / d for d = 1..64 as a table: a combinational 21-bit divider
+	// straight from the old2 RAM was a 51 ns path (first full compile, 2026-09-24)
+	function [20:0] recip(input [6:0] d);
+		integer k;
+		begin
+			recip = 21'd0;
+			for (k = 1; k <= 64; k = k + 1) if (d == k[6:0]) recip = 21'h100000 / k;
+		end
 	endfunction
 
 	reg  [7:0]  y;
@@ -239,7 +248,7 @@ module macplus_sprites #(
 	wire        scan_done = !scanning && !sv1 && !sv2;
 
 	// ---------------------------------------------------------------- JOBS
-	localparam J_IDLE = 3'd0, J_PICK = 3'd1, J_LOAD = 3'd2, J_WAIT = 3'd3, J_ENT = 3'd4, J_ROW = 3'd5, J_COL = 3'd6;
+	localparam J_IDLE = 3'd0, J_PICK = 3'd1, J_LOAD = 3'd2, J_WAIT = 3'd3, J_ENT = 3'd4, J_ROW = 3'd5, J_COL = 3'd6, J_ENT2 = 3'd7;
 	reg  [2:0]  jst;
 	reg  [7:0]  jw;
 	reg  [3:0]  jmask;
@@ -343,8 +352,11 @@ module macplus_sprites #(
 				fy <= o2_q[95]; fx <= o2_q[94]; alpha <= o2_q[93]; pri <= o2_q[91:90];
 				col <= (o2_q[15:14] == 2'b10) ? {o2_q[85:83], 2'b00} : (o2_q[15:14] == 2'b01) ? o2_q[87:83] : 5'd0;
 				dw <= dst(o2_q[41:32]); dh <= dst(o2_q[57:48]);
-				ddx <= recip(dst(o2_q[41:32])); ddy <= recip(dst(o2_q[57:48]));
-				k <= 4'd0; jst <= J_ROW;
+				k <= 4'd0; jst <= J_ENT2;
+			end
+			J_ENT2: begin                      // the reciprocals from the registered sizes
+				ddx <= recip(dw); ddy <= recip(dh);
+				jst <= J_ROW;
 			end
 			J_ROW: begin
 				if (dw == 7'd0 || dh == 7'd0) jst <= J_PICK;

@@ -11,8 +11,17 @@ module macplus_core #(
 	input             reset,
 	input             quiz,          // quizmoon: 224 lines, sample banks 2/3
 	input             pause,
+	input             flip,          // OSD Flip (rot180, in the video block)
 	input      [31:0] inputs,
 	input      [15:0] dsw,
+	// main RAM back door (hiscore, cheats; later savestate), longword address;
+	// it owns the RAM while ram2_sel, which its users raise only with the CPU paused
+	input             ram2_sel,
+	input      [14:0] ram2_addr,
+	input             ram2_we,
+	input      [3:0]  ram2_be,
+	input      [31:0] ram2_din,
+	output     [31:0] ram2_dout,
 	// program ROMs
 	output            mrom_req,
 	output     [19:0] mrom_addr,     // longword
@@ -86,13 +95,13 @@ module macplus_core #(
 		.vid_dout(vid_dout), .vid_ack(vid_ack), .fade(fade),
 		.inputs(inputs), .dsw(dsw), .vblank_start(vblank_start),
 		.snd_cmd_we(snd_cmd_we), .snd_cmd(snd_cmd), .snd_pending(snd_pending),
-		.ram2_addr(15'd0), .ram2_we(1'b0), .ram2_be(4'd0), .ram2_din(32'd0), .ram2_dout(),
-		.dbg_pc_addr(dbg_cpu_addr), .dbg_irq3(dbg_irq3), .dbg_iack3(dbg_iack3), .dbg_idle(dbg_idle));
+		.ram2_sel(ram2_sel), .ram2_addr(ram2_addr), .ram2_we(ram2_we), .ram2_be(ram2_be), .ram2_din(ram2_din), .ram2_dout(ram2_dout),
+		.dbg_pc_addr(dbg_cpu_addr), .dbg_irq3(dbg_irq3), .dbg_iack3(dbg_iack3), .dbg_idle(dbg_idle), .dbg_cache_miss());
 
 	wire [11:0] dbg_pen;
 	wire [7:0]  dbg_spr_hits;
 	macplus_video #(.SPR_STAGES(SPR_STAGES)) u_video (
-		.clk(clk), .reset(reset), .quiz(quiz),
+		.clk(clk), .reset(reset), .quiz(quiz), .flip(flip),
 		.ce_pix(ce_pix), .hcount(hcount), .vcount(vcount), .vtick(vtick), .vblank_start(vblank_start),
 		.cpu_sel(vid_sel), .cpu_addr(vid_addr), .cpu_we(vid_we), .cpu_be(vid_be), .cpu_din(vid_din),
 		.cpu_dout(vid_dout), .cpu_ack(vid_ack), .fade(fade), .spr_rebuild(1'b0),
