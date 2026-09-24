@@ -18,8 +18,8 @@ The board has:
 - three zoomable 8 bpp tilemaps, a 4 bpp text layer, and 1,024 zoomable
   sprites with 50 % translucency.
 
-MAME's `nmk/macrossp.cpp` (David Haywood, Paul Priest) is the behavioural
-reference, and every claim below is a measurement against it
+MAME's `nmk/macrossp.cpp` (David Haywood, Paul Priest, Nicola Salmoria) is
+the behavioural reference, and every claim below is a measurement against it
 (`docs/known-issues.md`):
 
 - **Video block:** MAME's pictures reproduced **pixel for pixel** from MAME's
@@ -46,7 +46,7 @@ load; `docs/known-issues.md` MP-12).
 
 ## Credits
 
-- MAME's driver: David Haywood, Paul Priest.
+- MAME's driver: David Haywood, Paul Priest, Nicola Salmoria.
 - TG68K.C: Tobias Gubener, as shipped (with its documented changes) by
   TheJesusFish's Arcade-ITech32_MiSTer.
 - The ES5506 model, and the TG68K wrapper and bus adapter this core's CPU

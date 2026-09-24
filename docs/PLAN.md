@@ -2,8 +2,8 @@
 
 **Macross Plus** (MOSS / Banpresto, 1996) and **Quiz Bishoujo Senshi Sailor
 Moon - Chiryoku Tairyoku Toki no Un** (Banpresto, 1997) as a MiSTer FPGA core.
-The reference is MAME's `nmk/macrossp.cpp` (driver by **David Haywood** and
-**Paul Priest**). Local copy: `~/mame/src/mame/nmk/macrossp.cpp`, 1,170 lines.
+The reference is MAME's `nmk/macrossp.cpp` (driver by **David Haywood**,
+**Paul Priest** and **Nicola Salmoria**). Local copy: `~/mame/src/mame/nmk/macrossp.cpp`, 1,170 lines.
 It is identical to `master` as of today (`diff` against the raw GitHub file:
 no difference).
 
