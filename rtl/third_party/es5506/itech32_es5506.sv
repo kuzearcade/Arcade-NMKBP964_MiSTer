@@ -9,7 +9,8 @@
 
 module itech32_es5506 #(
 	parameter integer SLOT_TICKS = 16,
-	parameter bit ENABLE_PROGRAM_PREWARM = 1'b1
+	parameter bit ENABLE_PROGRAM_PREWARM = 1'b1,
+	parameter integer SS_GLOB_W = 456 + ((SLOT_TICKS <= 1) ? 1 : $clog2(SLOT_TICKS))   // derived: do not override
 ) (
 	input  logic               clk,
 	input  logic               reset,
@@ -50,7 +51,21 @@ module itech32_es5506 #(
 	output logic [6:0]         current_page,
 	output logic [4:0]         active_voices,
 	output logic [4:0]         scan_voice,
-	output logic               engine_busy
+	output logic               engine_busy,
+	// Savestate port (Arcade-NMKMacPlus_MiSTer, 2026-09-24; not in ITech32).
+	// Valid only while ce_16m is held low and engine_busy is low: ss_en takes
+	// the engine/host row read port (row on ss_row_q one clock after
+	// ss_voice), ss_row_we writes a whole row to both replicas, ss_glob_we
+	// loads the global register set. Tie ss_en/ss_row_we/ss_glob_we low
+	// otherwise.
+	input  logic               ss_en,
+	input  logic [4:0]         ss_voice,
+	output logic [430:0]       ss_row_q,
+	input  logic               ss_row_we,
+	input  logic [430:0]       ss_row_d,
+	output logic [SS_GLOB_W-1:0] ss_glob_q,
+	input  logic               ss_glob_we,
+	input  logic [SS_GLOB_W-1:0] ss_glob_d
 );
 
 	localparam logic [15:0] CONTROL_CMPD     = 16'h2000;
@@ -875,6 +890,17 @@ module itech32_es5506 #(
 		terminal_sum_right = work_mix_right + terminal_input_right;
 	end
 
+	assign ss_glob_q = {write_latch, read_latch, current_page_reg, active_voices_reg, mode,
+		w_st, w_end, lr_end, irq, irq_vector_reg, irq_ack_pending, scan_voice_reg, slot_count,
+		channel_mix_left[0], channel_mix_left[1], channel_mix_left[2],
+		channel_mix_left[3], channel_mix_left[4], channel_mix_left[5],
+		channel_mix_right[0], channel_mix_right[1], channel_mix_right[2],
+		channel_mix_right[3], channel_mix_right[4], channel_mix_right[5],
+		audio_left_channels[19:0], audio_right_channels[19:0]};
+	// the same fields, LSB-relative: the channel block below and the host
+	// block each load their own
+	localparam integer SSG_CM = 40;                 // channel_mix_right[5] starts here
+
 	genvar channel_index;
 	generate
 	for (channel_index = 0; channel_index < 6; channel_index = channel_index + 1) begin : channel_output
@@ -884,6 +910,13 @@ module itech32_es5506 #(
 				channel_mix_right[channel_index] <= 23'sd0;
 				audio_left_channels[channel_index*20 +: 20] <= 20'sd0;
 				audio_right_channels[channel_index*20 +: 20] <= 20'sd0;
+			end else if (ss_glob_we) begin
+				channel_mix_left[channel_index]  <= ss_glob_d[SSG_CM + 23*(11-channel_index) +: 23];
+				channel_mix_right[channel_index] <= ss_glob_d[SSG_CM + 23*(5-channel_index) +: 23];
+				if (channel_index == 0) begin
+					audio_left_channels[19:0]  <= ss_glob_d[39:20];
+					audio_right_channels[19:0] <= ss_glob_d[19:0];
+				end
 			end else begin
 				// PAGE40 writes the same accumulator used by voice processing.
 				// No undocumented test-mode freeze is invented. A write after
@@ -1276,6 +1309,8 @@ module itech32_es5506 #(
 		if (host_access_pending || host_write_execute_pending ||
 		    host_read_select_pending || host_read_response_pending)
 			voice_engine_read_addr = host_page_q[4:0];
+		if (ss_en)
+			voice_engine_read_addr = ss_voice;
 
 		voice_prefetch_read_addr = prefetch_scan_voice;
 		if (prefetch_urgent_dispatch || prefetch_program_dispatch)
@@ -1393,7 +1428,13 @@ module itech32_es5506 #(
 			voice_write_data.o4n1 = filter_pole4_reg;
 			voice_write_data.control = stepped_control_reg;
 		end
+		if (ss_row_we) begin
+			voice_write_en = 1'b1;
+			voice_write_addr = ss_voice;
+			voice_write_data = ss_row_d;
+		end
 	end
+	assign ss_row_q = voice_engine_data;
 
 	// Canonical synchronous simple-dual-port inference for both replicas.
 	// Engine/host ownership separates their row reads from writes. The concurrent
@@ -1828,6 +1869,10 @@ module itech32_es5506 #(
 			work_mix_right <= 23'sd0;
 			work_channel_select <= 6'd0;
 			audio_strobe <= 1'b0;
+		end else if (ss_glob_we) begin
+			{write_latch, read_latch, current_page_reg, active_voices_reg, mode,
+			 w_st, w_end, lr_end, irq, irq_vector_reg, irq_ack_pending, scan_voice_reg, slot_count}
+				<= ss_glob_d[SS_GLOB_W-1 : SSG_CM + 276];
 		end else begin
 			host_ack <= 1'b0;
 			audio_strobe <= 1'b0;

@@ -44,7 +44,10 @@ assign VIDEO_ARY = (!ar) ? (video_rotated ? 12'd4 : 12'd3) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"NMKMacPlus;;",
+	// Savestates: 4 slots of 0x80000 bytes at 0x3E000000, above the 62 MB ROM
+	// image at 0x30000000. The image is 0x24900 16-bit words = 0x49200 bytes
+	// (docs/PLAN.md Appendix C), so the slot is the next power of two up.
+	"NMKMacPlus;SS3E000000:80000;",
 	"-;",
 	"HBO[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"HBO[3:1],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
@@ -81,6 +84,12 @@ localparam CONF_STR = {
 	"h7P2O[36],Cheat 5,Off,On;",
 	"h8P2O[37],Cheat 6,Off,On;",
 	"h9P2O[38],Cheat 7,Off,On;",
+	"P4,Savestates;",
+	"P4O[41:40],Slot,1,2,3,4;",
+	"P4-;",
+	// Slot 2 is F5, not F2: F2 is Service (NMK-34).
+	"P4R[42],Save state (Alt+F1 F5 F3 F4);",
+	"P4R[43],Load state (F1 F5 F3 F4);",
 	"-;",
 	"R[0],Reset;",
 	"J1,Button 1,Button 2,Button 3,Button 4,Start,Coin;",
@@ -92,6 +101,18 @@ wire         direct_video;
 wire   [1:0] buttons;
 wire [127:0] status;
 wire  [10:0] ps2_key;
+// savestate engine and UI (instantiated with the core below)
+wire  [1:0] ss_slot;
+wire  [7:0] ss_info;
+wire        ss_save, ss_load, ss_info_req, ss_status_update;
+wire        ss_busy, ss_done_ok, ss_done_fail, ss_was_load;
+wire  [1:0] ss_fail_code;
+wire        ss_freeze, ss_frozen, ss_parked, ss_resume, ss_active, ss_rd, ss_wr, ss_ack, ss_replay, ss_replay_done;
+wire [19:0] ss_addr;
+wire [15:0] ss_rdata, ss_wdata;
+wire        eng_we, eng_rd, eng_grant, eng_ready;
+wire [28:0] eng_addr;
+wire [63:0] eng_din, eng_q;
 wire  [31:0] joystick_0, joystick_1;
 
 wire         ioctl_download;
@@ -117,8 +138,8 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	// High Scores is Off; [9:3] hide the unused cheat slots; [1] shows Autofire;
 	// [0] hides Orientation under direct video.
 	.status_menumask({4'd0, direct_video, hs_enable, ch_avail, 1'b0, autofire_unlock, direct_video}),
-	.status_in(status), .status_set(1'b0),
-	.info_req(1'b0), .info(8'd0),
+	.status_in({status[127:42], ss_slot, status[39:0]}), .status_set(ss_status_update),
+	.info_req(ss_info_req), .info(ss_info),
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
 	.ioctl_download(ioctl_download),
@@ -333,6 +354,8 @@ macplus_rom_hw rom_hw (
 	.ddr_yield(1'b0), .ddr_busy(DDRAM_BUSY | rot_we),
 	.ddr_rd(rh_rd), .ddr_we(rh_we), .ddr_addr(rh_addr), .ddr_burstcnt(rh_burst), .ddr_din(rh_din), .ddr_be(rh_be),
 	.ddr_dout(DDRAM_DOUT), .ddr_dout_ready(DDRAM_DOUT_READY),
+	.ss_ddr_we(eng_we), .ss_ddr_rd(eng_rd), .ss_ddr_addr(eng_addr), .ss_ddr_din(eng_din),
+	.ss_ddr_grant(eng_grant), .ss_ddr_q(eng_q), .ss_ddr_ready(eng_ready),
 	.dbg_copy_words(), .dbg_dl_bytes()
 );
 
@@ -391,9 +414,38 @@ wire        ce_pix_core, hb_core, vb_core, hs_core, vs_core;
 wire  [8:0] hcount_core, vcount_core;
 wire [23:0] core_rgb, core_rgb_fade;
 wire signed [15:0] snd_l, snd_r;
+// ------------------------------------------------------------------
+// Savestates (docs/PLAN.md 2.9): the siblings' UI and engine, the engine in
+// its handshake mode (VARLAT) because the core answers most image words
+// through its CPU bus. Its DDR port is rom_hw's lowest-priority client, so
+// the BG rows and samples keep their bandwidth and screen_rotate its writes.
+// ------------------------------------------------------------------
+wire        core_reset = reset | ~rom_ready | ~sdram_ready;
+
+savestate_ui savestate_ui (
+	.clk(clk_sys), .ps2_key(ps2_key), .allow_ss(~core_reset),
+	.status_slot(status[41:40]), .OSD_saveload(status[43:42]),
+	.done_ok(ss_done_ok), .done_fail(ss_done_fail), .fail_code(ss_fail_code), .was_load(ss_was_load),
+	.ss_save(ss_save), .ss_load(ss_load), .ss_info_req(ss_info_req), .ss_info(ss_info),
+	.statusUpdate(ss_status_update), .selected_slot(ss_slot)
+);
+
+savestate #(.SS_WORDS(20'h24900), .DDR_BASE(29'h07C00000), .SLOT_STRIDE(29'h00010000), .VARLAT(1)) savestate (
+	.clk(clk_sys), .reset(core_reset),
+	.save_req(ss_save), .load_req(ss_load), .slot(ss_slot), .vblank(vblank_core), .allow(~ioctl_download),
+	.ss_freeze(ss_freeze), .ss_frozen(ss_frozen), .ss_parked(ss_parked), .ss_resume(ss_resume), .ss_active(ss_active),
+	.ss_addr(ss_addr), .ss_rdata(ss_rdata), .ss_wr(ss_wr), .ss_rd(ss_rd), .ss_ack(ss_ack), .ss_wdata(ss_wdata),
+	.ss_replay(ss_replay), .ss_replay_done(ss_replay_done),
+	.busy(ss_busy), .done_ok(ss_done_ok), .done_fail(ss_done_fail), .fail_code(ss_fail_code), .was_load(ss_was_load),
+	.clk_ddr(CLK_VIDEO), .ddr_busy(~eng_grant), .rot_we(1'b0),
+	.ddr_we(eng_we), .ddr_rd(eng_rd), .ddr_addr(eng_addr), .ddr_din(eng_din),
+	.ddr_dout(eng_q), .ddr_dout_ready(eng_ready)
+);
+
 macplus_core #(.CE_NUM(8'd29)) core (
-	.clk(clk_sys), .reset(reset | ~rom_ready | ~sdram_ready), .quiz(quiz),
-	.pause(status[29] | hs_pause | ch_pause), .flip(status[17]), .trace_on(1'b0),
+	.clk(clk_sys), .reset(core_reset), .quiz(quiz),
+	// the engine masks pause: both CPUs have to execute to reach their monitors
+	.pause((status[29] | hs_pause | ch_pause) & ~ss_busy), .flip(status[17]), .trace_on(1'b0),
 	.inputs(inputs), .dsw(dsw),
 	.ram2_sel(hs_access), .ram2_addr(hs_off[16:2]), .ram2_we(hs_write & hs_access), .ram2_be(4'b0001 << hs_lane),
 	.ram2_din({4{hs_din}}), .ram2_dout(ram2_dout),
@@ -406,7 +458,10 @@ macplus_core #(.CE_NUM(8'd29)) core (
 	.hsync(hs_core), .vsync(vs_core), .rgb(core_rgb), .rgb_fade(core_rgb_fade),
 	.snd_l(snd_l), .snd_r(snd_r),
 	.dbg_irq3(), .dbg_iack3(), .dbg_idle(), .dbg_es_writes(), .dbg_es_irq(), .dbg_latch_reads(),
-	.dbg_latch_writes(), .dbg_cpu_addr(), .dbg_spr_max_cycles(), .dbg_spr_overruns(), .dbg_bg_overruns());
+	.dbg_latch_writes(), .dbg_cpu_addr(), .dbg_spr_max_cycles(), .dbg_spr_overruns(), .dbg_bg_overruns(),
+	.ss_freeze(ss_freeze), .ss_resume(ss_resume), .ss_active(ss_active), .ss_addr(ss_addr), .ss_rd(ss_rd), .ss_wr(ss_wr),
+	.ss_wdata(ss_wdata), .ss_rdata(ss_rdata), .ss_ack(ss_ack), .ss_frozen(ss_frozen), .ss_parked(ss_parked),
+	.ss_replay(ss_replay), .ss_replay_done(ss_replay_done));
 assign AUDIO_L = snd_l;
 assign AUDIO_R = snd_r;
 assign vblank_core = vb_core;

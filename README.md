@@ -37,7 +37,8 @@ every finding (MP-n), and `docs/provenance.md` for where every file came from.
 DIP switches in the OSD, pause, high scores (macrossp), cheats (seven slots,
 named in each `.mra`), autofire (macrossp, unlocked by the `.mra`),
 orientation (both quarter turns), flip, CRT Adjust, scandoubler/HQ2x, MAME's
-keyboard layout. Savestates are planned (M5) but not in the first bitstream.
+keyboard layout, savestates (four slots; Alt+F1/F5/F3/F4 save, F1/F5/F3/F4
+load; `docs/known-issues.md` MP-12).
 
 ## Credits
 

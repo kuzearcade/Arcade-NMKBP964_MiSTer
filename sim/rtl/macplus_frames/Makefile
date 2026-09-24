@@ -2,7 +2,7 @@
 #   make && ./obj_dir/Vmacplus_core IMAGES_DIR FRAMES
 # The rule depends on every RTL file Verilator pulls in through -y (MS1-58).
 RTL := ../../../rtl
-SRCS := $(wildcard $(RTL)/macplus/*.sv) $(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v \
+SRCS := $(wildcard $(RTL)/macplus/*.sv) $(wildcard $(RTL)/savestate/*.sv) $(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v \
         $(wildcard $(RTL)/third_party/es5506/*.sv) $(RTL)/third_party/fx68k/fx68k.sv $(RTL)/third_party/fx68k/fx68kAlu.sv $(RTL)/third_party/fx68k/uaddrPla.sv
 all: obj_dir/Vmacplus_core microrom.mem nanorom.mem
 microrom.mem nanorom.mem:
@@ -11,17 +11,26 @@ obj_dir/Vmacplus_core: tb.cpp $(SRCS)
 	verilator --cc --exe --build -O3 -j 8 -CFLAGS -O3 --x-assign fast --x-initial fast -Wno-fatal \
 		-Wno-WIDTH -Wno-PINCONNECTEMPTY -Wno-UNOPTFLAT -Wno-LATCH -Wno-MULTIDRIVEN -Wno-CASEINCOMPLETE \
 		-Wno-IMPLICIT -Wno-SELRANGE -Wno-UNSIGNED -Wno-BLKANDNBLK -Wno-COMBDLY -Wno-CASEOVERLAP -Wno-TIMESCALEMOD \
-		--top-module macplus_core -y $(RTL)/macplus -y $(RTL)/third_party/es5506 -y $(RTL)/third_party/fx68k \
+		--top-module macplus_core -y $(RTL)/macplus -y $(RTL)/savestate -y $(RTL)/third_party/es5506 -y $(RTL)/third_party/fx68k \
 		$(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v $(RTL)/third_party/fx68k/fx68k.sv $(RTL)/third_party/fx68k/fx68kAlu.sv $(RTL)/third_party/fx68k/uaddrPla.sv \
 		$(RTL)/macplus/macplus_core.sv tb.cpp -o Vmacplus_core
+# SS-13's savestate gate: the core and the engine under ss_top, tb.cpp with MP_SS
+#   make obj_ss/Vss_top && MP_SS=T,K ./obj_ss/Vss_top IMAGES_DIR FRAMES
+obj_ss/Vss_top: tb.cpp ss_top.sv $(SRCS)
+	verilator --cc --exe --build -O3 -j 8 -CFLAGS "-O3 -DMP_SS" --x-assign fast --x-initial fast -Wno-fatal \
+		-Wno-WIDTH -Wno-PINCONNECTEMPTY -Wno-UNOPTFLAT -Wno-LATCH -Wno-MULTIDRIVEN -Wno-CASEINCOMPLETE \
+		-Wno-IMPLICIT -Wno-SELRANGE -Wno-UNSIGNED -Wno-BLKANDNBLK -Wno-COMBDLY -Wno-CASEOVERLAP -Wno-TIMESCALEMOD \
+		--Mdir obj_ss --top-module ss_top -y $(RTL)/macplus -y $(RTL)/savestate -y $(RTL)/third_party/es5506 -y $(RTL)/third_party/fx68k \
+		$(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v $(RTL)/third_party/fx68k/fx68k.sv $(RTL)/third_party/fx68k/fx68kAlu.sv $(RTL)/third_party/fx68k/uaddrPla.sv \
+		ss_top.sv tb.cpp -o Vss_top
 clean:
-	rm -rf obj_dir
+	rm -rf obj_dir obj_ss
 # The build above passes -Wno-fatal and -Wno-IMPLICIT, which let an undriven
 # output (rom_req) and a state constant used before its declaration through
 # silently (2026-09-24). `make lint` fails on those classes in this core's RTL.
 lint:
 	verilator --lint-only -Wall -Wno-fatal -Wno-BLKANDNBLK --top-module macplus_core \
-		-y $(RTL)/macplus -y $(RTL)/third_party/es5506 -y $(RTL)/third_party/fx68k \
+		-y $(RTL)/macplus -y $(RTL)/savestate -y $(RTL)/third_party/es5506 -y $(RTL)/third_party/fx68k \
 		$(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v $(RTL)/third_party/fx68k/fx68k.sv $(RTL)/third_party/fx68k/fx68kAlu.sv $(RTL)/third_party/fx68k/uaddrPla.sv \
 		$(RTL)/macplus/macplus_core.sv 2>&1 | grep -A1 -E '^%(Error|Warning-(UNDRIVEN|IMPLICIT|USEDBEFOREDECL))' | grep -B1 'rtl/macplus/' ; test $$? -ne 0
 .PHONY: lint clean

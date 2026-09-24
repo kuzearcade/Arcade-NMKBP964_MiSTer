@@ -27,7 +27,12 @@ module savestate #(
 	parameter [28:0] DDR_BASE     = 29'h07C00000,   // 0x3E000000 >> 3
 	parameter [28:0] SLOT_STRIDE  = 29'h00008000,   // 0x40000 bytes >> 3
 	parameter        TIMEOUT_BITS = 22,
-	parameter        RD_LAT       = 3                // clocks from ss_addr to a valid ss_rdata
+	parameter        RD_LAT       = 3,               // clocks from ss_addr to a valid ss_rdata
+	// VARLAT=1 (NMKMacPlus, 2026-09-24): every word is a handshake instead of a
+	// fixed latency. A read pulses ss_rd with ss_addr stable and takes ss_rdata
+	// on the clock ss_ack is high; a write pulses ss_wr and waits for ss_ack.
+	// The core can then route words through its CPU bus, whose latency varies.
+	parameter        VARLAT       = 0
 ) (
 	input             clk,
 	input             reset,
@@ -47,6 +52,8 @@ module savestate #(
 	output reg [19:0] ss_addr,
 	input      [15:0] ss_rdata,
 	output reg        ss_wr,
+	output reg        ss_rd,         // VARLAT: one-clock read strobe
+	input             ss_ack,        // VARLAT: the word's read data is valid / write is done
 	output reg [15:0] ss_wdata,
 	output reg        ss_replay,
 	input             ss_replay_done,
@@ -107,7 +114,7 @@ module savestate #(
 	assign busy = (state != S_IDLE);
 
 	always @(posedge clk) begin
-		done_ok <= 1'b0; done_fail <= 1'b0; ss_wr <= 1'b0;
+		done_ok <= 1'b0; done_fail <= 1'b0; ss_wr <= 1'b0; ss_rd <= 1'b0;
 		vb_d <= vblank;
 		if (reset) begin
 			state <= S_IDLE; ss_freeze <= 1'b0; ss_resume <= 1'b0; ss_active <= 1'b0; ss_replay <= 1'b0;
@@ -156,7 +163,11 @@ module savestate #(
 				// ---- save: 4 bus reads, one DDR write ----
 				S_SRD: begin
 					cnt <= cnt + 1'b1;
-					if (cnt == RD_LAT) begin
+					if (VARLAT && cnt == 4'd0) ss_rd <= 1'b1;
+					if (VARLAT && cnt != 4'd0) cnt <= cnt;
+					if (VARLAT && tmo_hit) begin fail_r <= 2'd3; ss_active <= 1'b0; state <= S_RELEASE; ss_resume <= 1'b1; tmo <= '0; end
+					else if (VARLAT ? (cnt != 4'd0 && ss_ack) : (cnt == RD_LAT)) begin
+						tmo <= '0;
 						case (k)
 							2'd0: pack[15:0]  <= ss_rdata;
 							2'd1: pack[31:16] <= ss_rdata;
@@ -206,7 +217,10 @@ module savestate #(
 						endcase
 					end
 					if (cnt == 4'd1) ss_wr <= 1'b1;
-					if (cnt == 4'd3) begin
+					if (VARLAT && cnt == 4'd2) cnt <= cnt;         // hold until the core acknowledges
+					if (VARLAT && tmo_hit) begin fail_r <= 2'd3; ss_active <= 1'b0; state <= S_RELEASE; ss_resume <= 1'b1; tmo <= '0; end
+					else if (VARLAT ? (cnt == 4'd2 && ss_ack) : (cnt == 4'd3)) begin
+						tmo <= '0;
 						cnt <= 4'd0; k <= k + 1'b1;
 						if (k == 2'd3) begin
 							widx <= widx + 1'b1;

@@ -50,7 +50,15 @@ module macplus_cpu_bus (
 	output reg [31:0] dbg_idle_writes,
 	output reg        dbg_idle_pulse,    // one clock per idle-loop counter write
 	output reg [31:0] dbg_cache_miss,
-	input             trace_on           // simulation only (MP_TRACE): log bus cycles while high
+	input             trace_on,          // simulation only (MP_TRACE): log bus cycles while high
+	// savestate park overlay (ss_tg68_park): the captured cycle, and its answer
+	output            cap_cyc,           // one clock: c_* below is being decoded
+	output            cap_between,       // no bus cycle in progress
+	output     [23:0] cap_addr,
+	output            cap_we,
+	output     [15:0] cap_wdata,
+	input             ovl_hit,           // the captured cycle is the overlay's
+	input      [15:0] ovl_rdata
 );
 	// ================================================================ TG68K
 	wire        tg_clkena;
@@ -91,6 +99,12 @@ module macplus_cpu_bus (
 	wire        c_iack = !c_we && c_fc == 3'b111 && c_addr[31:4] == 28'hFFF_FFFF;
 	wire        c_rom  = c_addr[23:22] == 2'b00;
 	wire        c_ram  = c_addr[23:17] == 7'b1111_000;   // F00000-F1FFFF
+
+	assign cap_cyc     = st == S_CAP;
+	assign cap_between = st == S_IDLE;
+	assign cap_addr    = c_addr[23:0];
+	assign cap_we      = c_we;
+	assign cap_wdata   = c_wdata;
 
 	// ================================================================ main RAM
 	// ONE write port and ONE read port, each an address mux (MS1Z's work RAM):
@@ -177,6 +191,9 @@ module macplus_cpu_bus (
 				// the RAM and the cache sample c_addr this clock
 				if (c_iack) begin
 					iack <= 1'b1; iack_level <= c_addr[3:1]; tg_rdata <= 16'hFFFF; st <= S_RESP;
+				end else if (ovl_hit) begin
+					if (!c_we) tg_rdata <= ovl_rdata;                  // the park monitor's overlay
+					st <= S_RESP;
 				end else if (c_ram) begin
 					if (c_we) begin
 						ram_we <= 1'b1;

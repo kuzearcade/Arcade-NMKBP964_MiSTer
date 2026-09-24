@@ -144,7 +144,7 @@ The harness also measured the output latency: `rgb` is two pixels behind
 `hcount` (the MS1-59 alignment). `sim/rtl/macplus_frames` uses the same
 offset.
 
-## MP-6 — The CPU's bus path was 2.4x slower than MAME's 68020 (fixed; D3 calibration in progress)
+## MP-6 — The CPU's bus path was 2.4x slower than MAME's 68020 (fixed; D3 calibration open, see the end)
 
 The whole board boots from reset in `sim/rtl/macplus_frames`:
 - TG68K runs the game and IRQ3 is acknowledged every frame;
@@ -227,6 +227,32 @@ also mostly bus-bound. The calibration needs gameplay: the M2 harness is to
 get the same scripted play and cheat pokes as `macplus_play.lua`. Until then
 29/48 stands, because it matches MAME's idle count and its all-frame average
 work.
+
+### Gameplay work, 2026-09-24: inconclusive
+
+Three runs at CE 21, 25 and 29 / 48 (`MP_PLAY=1`, 1,300 frames), measured
+from the level-3 acknowledge (the earlier measure started at vblank and
+counted 0.4 µs "frames"), against MAME with perfect quantum, frames 720-1040:
+
+| | mean µs | median | p90 | max |
+|---|---|---|---|---|
+| MAME | 1,237 | 382 | 3,421 | 9,253 |
+| CE 21 | 718 | 483 | 1,074 | 6,406 |
+| CE 25 | 770 | 462 | 2,695 | 7,550 |
+| CE 29 | 576 | 416 | 2,184 | 4,999 |
+
+The core's play diverges from MAME's within a few frames: the best
+frame-to-frame correlation is 0.2. The medians hardly move across a 1.38x
+change of clock, so this measure cannot choose CE. The static attract screen
+still can: 319 µs at CE 29 against MAME's 333 µs. The bitstream keeps CE 29
+until a gameplay comparison drives both machines through the same states (MAME
+state injection, or a scene with no randomness).
+
+The first attempt at these runs was void: commit `7e42cf0` dropped `rom_req`'s
+driver and used `S_FILL2` before declaring it, so the main CPU never fetched.
+`-Wno-fatal` / `-Wno-IMPLICIT` hid both; `make lint` in
+`sim/rtl/macplus_frames` now fails on undriven, implicit and
+used-before-declared signals in `rtl/macplus`.
 
 ## MP-7 — The video output clock: 625 dots of 9.6 MHz per line (open, analog width)
 
@@ -349,3 +375,65 @@ With the offsets 26 bits wide (bitstream md5 `5bb16d69...`, timing met: the
 system clock at +0.831 ns; 33,052 ALMs, 548 / 553 M10K) the board runs the
 attract correctly: the Banpresto screen, the specification page with its
 mech, the zoomed tunnel and mech scenes, and the title screen.
+
+## MP-12 — Savestates: the gate passes with 2 words of ES5506 scan phase (closed, measured)
+
+Design (docs/PLAN.md 2.9, Appendix C as built):
+- **68020 park.** `ss_tg68_park.sv` serves the siblings' 68000 monitor from
+  an overlay at 0x7F8000, unmapped on this board. It answers the cycles
+  `macplus_cpu_bus` captures. Q1 found no `MOVEC` in the code either game
+  runs, so VBR stays 0 (the level-7 vector is read at 0x7C) and VBR, CACR,
+  SFC and DFC need no saving.
+- **Sound.** The 68000 parks through `ss_m68k_park`. Then the ES5506's
+  16 MHz enable stops, and once the engine has finished its voice the chip's
+  voice rows and globals are read and written through a port added to the
+  vendored chip.
+- **The image path.** M10K is at 550 / 553, so the image goes through
+  existing ports:
+  - main RAM through its back door;
+  - the video memories as ordinary cycles on the CPU's board bus;
+  - the sprite stages through the copy port.
+  The engine runs in a handshake mode (`VARLAT=1`) for that.
+- **The vblank edge.** IRQ3 and the sprite copy are gated while the engine
+  holds the machine. Saves freeze and loads release at a vblank edge, so both
+  see the same machine. After a load the sprite extent table is rebuilt from
+  the restored `old2`.
+- **DDR3.** The engine is `macplus_rom_hw`'s lowest-priority DDR3 client.
+
+The gate (SS-13's method, `sim/rtl/macplus_frames`, `obj_ss`,
+`MP_SS=300,60`):
+- slot 0 at frame 300 (attract);
+- slot 1 60 frames after it resumes;
+- load slot 0, then slot 2 60 frames after that resumes.
+
+Slots 1 and 2 are one state reached two ways:
+
+| region | words | differ |
+|---|---|---|
+| main RAM (incl. both parked stacks' frames) | 65,536 | 0 |
+| VRAM, line zoom, layer registers, live sprite RAM, palette | 49,152 | 0 |
+| sprites `old`, `old2` | 14,336 | 0 |
+| sound RAM | 16,384 | 0 |
+| ES5506 voices | 1,024 | 1 |
+| ES5506 globals | 32 | 1 |
+| scalars, park frames | 256 | 0 |
+
+**Pictures after each resume: identical, 60 / 60.**
+
+The two words are one phase offset. The globals word holds `scan_voice` and
+`slot_count`: voice 5 tick 13 against voice 12 tick 3, about 110 ticks of
+16 MHz, or 7 µs. The voice word is voice 5's `filtcnt`: that voice was
+processed once more on one path. The ES5506 stops only after the sound CPU
+reaches an instruction boundary, and that moves by microseconds relative to
+the vblank edge. This is the equivalent of the siblings' park-PC floor.
+
+The harness needed one fix: it cleared the request pulse before the clock
+edge that should have sampled it, so the first run never saved.
+
+On the board (bitstream md5 `fe3887a4...`; timing met; 35,605 ALMs (85 %),
+550 / 553 M10K):
+- Alt+F1 saved and the firmware wrote `savestates/Arcade/Macross Plus_1.ss`;
+- 10 s later F1 loaded, and the screenshot 1 s after the load is pixel-identical
+  to the one 1 s after the save (0 of 92,160 pixels; the scene between them
+  differed by 77,313);
+- the attract then went on from the restored point.

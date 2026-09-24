@@ -1181,22 +1181,29 @@ or the core carries one menu per game, selected by the game mode through
 | palette | 4096 x 24 bits | M10K x 2 copies | CPU / layer read, sprite read |
 | sound RAM | 32 K | M10K | sound CPU / savestate |
 
-## Appendix C — Savestate image (draft, bytes)
+## Appendix C — Savestate image (as built, 16-bit word addresses)
 
-| offset | contents | size |
+| words | contents | owner |
 |---|---|---|
-| `0x00000` | main RAM | 0x20000 |
-| `0x20000` | SCR A/B/C + text VRAM | 0x10000 |
-| `0x30000` | line zoom x4, layer registers x4 | 0x0900 |
-| `0x31000` | sprite RAM live, old, old2 | 0x9000 |
-| `0x3A000` | palette (32-bit words) | 0x4000 |
-| `0x3E000` | sound RAM | 0x8000 |
-| `0x46000` | ES5506: 32 voice rows + globals | ~0x1000 |
-| `0x47000` | scalars: latch, pending, toggle, fade, IRQ holds, dividers, copier/ready | 0x100 |
-| `0x47100` | 68020 park frame, 68000 park frame | 0x100 |
+| `00000-0FFFF` | main RAM, big-endian halves of F00000-F1FFFF | `macplus_main` (RAM back door) |
+| `10000-17FFF` | VRAM, layer = a[14:13] (SCR A, B, C, text) | main, over the board bus |
+| `18000-183FF` | line zoom, layer = a[9:8] | main, board bus |
+| `18400-1847F` | layer registers, 32 words per layer, 6 used | main, board bus |
+| `18800-19FFF` | live sprite RAM | main, board bus |
+| `1A000-1B7FF` | sprites `old`, big-endian halves | `macplus_sprites` |
+| `1C000-1DFFF` | sprites `old2`, 8 words per entry (6 used) | `macplus_sprites` |
+| `1E000-1FFFF` | palette | main, board bus |
+| `20000-23FFF` | sound RAM | `macplus_sound` |
+| `24000-243FF` | ES5506 voices: 32 rows of 32 words (27 used, 431 bits, MSB first) | sound, the chip's `ss_*` port |
+| `24400-2441F` | ES5506 globals (29 words, 460 bits) | sound |
+| `24800` | `{toggle, irq3, fade}` | main |
+| `24810-24811` | `{irq2, pending}`, the sound command | sound |
+| `24880-24883` | 68020 park frame: SSP, USP | `ss_tg68_park` |
+| `24884-24887` | 68000 park frame: SSP, USP | `ss_m68k_park` |
 
-About 0x47200 bytes, so a 0x80000 slot. The layout is final after M2's
-loopback test (stream out, in, out, compare), before any round-trip gate.
+`SS_WORDS = 0x24900` (0x49200 bytes), so the slot is 0x80000. The rest of the
+CPUs' registers are on their own stacks, in main and sound RAM. Unlisted words
+are holes the core answers with 0.
 
 ## Appendix D — Memory maps
 

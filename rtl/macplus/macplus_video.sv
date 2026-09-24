@@ -44,6 +44,17 @@ module macplus_video #(
 	output reg        cpu_ack,       // one clock; reads have variable latency
 	input      [7:0]  fade,          // B00012 high byte (0xFF: never written)
 	input             spr_rebuild,
+	output            spr_copy_busy,
+	// savestate: the sprite stages (macplus_sprites); everything else here is
+	// reached through the CPU port
+	input             ss_active,
+	input      [19:0] ss_addr,
+	input             ss_rd,
+	input             ss_wr,
+	input      [15:0] ss_wdata,
+	output     [15:0] ss_rdata,
+	output            ss_ack,
+	output            ss_owns,
 	// ROM streams
 	output     [3:0]  bg_req,
 	output     [91:0] bg_addr,       // 4 x 23-bit byte addresses (text in the fourth)
@@ -180,7 +191,10 @@ module macplus_video #(
 		.start(lstart), .line(tline), .busy(s_busy),
 		.rom_req(spr_req), .rom_addr(spr_addr), .rom_ready(spr_ready), .rom_valid(spr_valid), .rom_data(spr_data),
 		.rd_x(rd_x), .rd_half(rd_half), .rd_q(s_q),
-		.dbg_max_cycles(dbg_spr_max_cycles), .dbg_overruns(dbg_spr_overruns), .dbg_max_hits(dbg_spr_max_hits));
+		.dbg_max_cycles(dbg_spr_max_cycles), .dbg_overruns(dbg_spr_overruns), .dbg_max_hits(dbg_spr_max_hits),
+		.ss_active(ss_active), .ss_addr(ss_addr), .ss_rd(ss_rd), .ss_wr(ss_wr), .ss_wdata(ss_wdata),
+		.ss_rdata(ss_rdata), .ss_ack(ss_ack), .ss_owns(ss_owns));
+	assign spr_copy_busy = s_copy_busy;
 
 	// ================================================================ palette (one read port, three users)
 	reg  [7:0]  p0 [0:4095], p1 [0:4095], p2 [0:4095], p3 [0:4095];

@@ -12,7 +12,18 @@
 //   MP_PLAY=1            scripted play as sim/oracle/macplus_play.lua (coin at MP_PLAY_FROM,
 //                        default 600; start +60; fire, bomb and moves from +120) and, for
 //                        macrossp, its two cheat pokes each frame through the RAM back door
+//   MP_SS=T,K            (obj_ss build, top ss_top) SS-13's savestate gate: save slot 0 at
+//                        frame T; slot 1 K frames after it resumes; load slot 0; slot 2 K
+//                        frames after that resumes. Slots 1 and 2 are one state reached two
+//                        ways: every differing word is named per region, and the K pictures
+//                        after each resume are compared. MP_SS_DUMP=dir writes the slots.
+#ifdef MP_SS
+#include "Vss_top.h"
+typedef Vss_top Top;
+#else
 #include "Vmacplus_core.h"
+typedef Vmacplus_core Top;
+#endif
 #include "verilated.h"
 #include <cstdio>
 #include <cstdlib>
@@ -45,7 +56,17 @@ int main(int argc, char **argv) {
 	int F0 = env("MP_PLAY_FROM", 600);
 	int TRF = env("MP_TRACE_FRAME", -1);   // with +mptrace and a +define+MP_TRACE build
 
-	Vmacplus_core *t = new Vmacplus_core;
+	Top *t = new Top;
+#ifdef MP_SS
+	// DDR: four slots of 0x10000 64-bit words from 0; reads answer after 8 clocks
+	std::vector<uint64_t> ddr(4 * 0x10000, 0);
+	std::deque<std::pair<uint64_t, uint32_t>> ddrq;
+	int SS_T = 300, SS_K = 60;
+	if (getenv("MP_SS")) sscanf(getenv("MP_SS"), "%d,%d", &SS_T, &SS_K);
+	int ss_step = 0, ss_mark = -1;            // step: 0 save0 1 wait 2 save1 3 wait 4 load0 5 wait 6 save2 7 wait 8 done
+	std::vector<uint64_t> hash_a, hash_b;
+	t->save_req = 0; t->load_req = 0; t->slot = 0;
+#endif
 	uint64_t now = 0;
 	std::deque<Req> bgq, sq;
 	int mcount = -1, scount = -1, smpcount = -1;
@@ -101,7 +122,21 @@ int main(int argc, char **argv) {
 			for (int w = 0; w < 4; w++) t->spr_data[w] = o[w];
 			t->spr_valid = 1; sq.pop_front();
 		}
+#ifdef MP_SS
+		if (t->ddr_we) ddr[t->ddr_addr & 0x3FFFF] = t->ddr_din;
+		if (t->ddr_rd) ddrq.push_back({now + 8, t->ddr_addr & 0x3FFFF});
+		t->ddr_dout_ready = 0;
+		if (!ddrq.empty() && ddrq.front().first <= now) { t->ddr_dout = ddr[ddrq.front().second]; t->ddr_dout_ready = 1; ddrq.pop_front(); }
+		if (t->ss_done_ok || t->ss_done_fail) {
+			printf("SS step %d: %s (fail code %d) at frame %d\n", ss_step, t->ss_done_ok ? "ok" : "FAIL", t->ss_fail_code, frame);
+			if (t->ss_done_fail) { printf("SS gate: FAIL\n"); exit(1); }
+			ss_step++; ss_mark = frame;
+		}
+#endif
 		t->clk = 1; t->eval(); now++;
+#ifdef MP_SS
+		t->save_req = 0; t->load_req = 0;       // one-clock pulses: seen by exactly one rising edge
+#endif
 	};
 	for (int i = 0; i < 64; i++) tick();
 	t->reset = 0;
@@ -126,7 +161,11 @@ int main(int argc, char **argv) {
 						if (quiz) in &= ~(1u << (20 + (F / 30) % 4));
 					}
 					t->inputs = in;
+#ifdef MP_SS
+					if (!quiz && F >= F0 + 120 && !t->ss_busy) {
+#else
 					if (!quiz && F >= F0 + 120) {
+#endif
 						// the cheat pokes: pause, let the CPU block settle, write two bytes
 						t->pause = 1; for (int i = 0; i < 16; i++) tick();
 						auto poke = [&](uint32_t a, uint8_t b) {
@@ -152,6 +191,21 @@ int main(int argc, char **argv) {
 					fflush(stdout);
 					last_idle = t->dbg_idle; last_es = t->dbg_es_writes; last_lw = t->dbg_latch_writes; last_irq = t->dbg_irq3;
 				}
+#ifdef MP_SS
+				{
+					// the picture just finished, hashed, K frames after each resume
+					uint64_t h = 1469598103934665603ull;
+					for (int i = 0; i < 384 * H; i++) { h ^= fb[i] & 0xFFFFFF; h *= 1099511628211ull; }
+					if (ss_step == 2 && frame > ss_mark) hash_a.push_back(h);
+					if (ss_step == 6 && frame > ss_mark) hash_b.push_back(h);
+					auto req = [&](bool load, int sl) { if (load) t->load_req = 1; else t->save_req = 1; t->slot = sl; ss_step++; };
+					if (ss_step == 0 && frame + 1 == SS_T) req(false, 0);
+					else if (ss_step == 2 && frame == ss_mark + SS_K) req(false, 1);
+					else if (ss_step == 4 && frame == ss_mark + 5) req(true, 0);
+					else if (ss_step == 6 && frame == ss_mark + SS_K) req(false, 2);
+					else if (ss_step == 8) frames = frame + 1;
+				}
+#endif
 				frame++;
 				t->trace_on = (frame == TRF);
 			}
@@ -159,6 +213,33 @@ int main(int argc, char **argv) {
 		}
 	}
 	printf("done: %d frames, %llu clk\n", frame, (unsigned long long)now);
+#ifdef MP_SS
+	if (ss_step == 8) {
+		auto word = [&](int sl, uint32_t w) -> uint16_t { return ddr[sl * 0x10000 + 1 + w / 4] >> (16 * (w % 4)); };
+		struct R { const char *name; uint32_t a, b; } regs[] = {
+			{"main RAM", 0x00000, 0x10000}, {"VRAM x4", 0x10000, 0x18000}, {"line zoom x4", 0x18000, 0x18400},
+			{"layer registers", 0x18400, 0x18800}, {"sprite RAM live", 0x18800, 0x1A000}, {"sprites old", 0x1A000, 0x1B800},
+			{"sprites old2", 0x1C000, 0x1E000}, {"palette", 0x1E000, 0x20000}, {"sound RAM", 0x20000, 0x24000},
+			{"ES5506 voices", 0x24000, 0x24400}, {"ES5506 globals", 0x24400, 0x24420}, {"scalars", 0x24800, 0x24880},
+			{"park frames", 0x24880, 0x24900}};
+		int total = 0;
+		for (auto &r : regs) {
+			int d = 0, d01 = 0;
+			for (uint32_t w = r.a; w < r.b; w++) { d += word(1, w) != word(2, w); d01 += word(0, w) != word(1, w); }
+			printf("  %-18s %6u words  slot1/slot2 differ %5d   (slot0/slot1 %d)\n", r.name, r.b - r.a, d, d01);
+			if (d && getenv("MP_SS_LIST")) for (uint32_t w = r.a; w < r.b; w++) if (word(1, w) != word(2, w))
+				printf("    %05x: %04x %04x\n", w, word(1, w), word(2, w));
+			total += d;
+		}
+		int same = 0, n = std::min(hash_a.size(), hash_b.size());
+		for (int i = 0; i < n; i++) same += hash_a[i] == hash_b[i];
+		printf("SS gate: %d differing words; pictures after resume identical %d/%d\n", total, same, n);
+		if (getenv("MP_SS_DUMP")) for (int sl = 0; sl < 3; sl++) {
+			char fn[512]; snprintf(fn, sizeof fn, "%s/slot%d.bin", getenv("MP_SS_DUMP"), sl);
+			FILE *f = fopen(fn, "wb"); fwrite(&ddr[sl * 0x10000], 8, 0x10000, f); fclose(f);
+		}
+	} else printf("SS gate: did not finish (step %d)\n", ss_step);
+#endif
 	if (wav) fclose(wav);
 	delete t;
 	return 0;

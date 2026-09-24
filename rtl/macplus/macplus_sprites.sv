@@ -61,8 +61,35 @@ module macplus_sprites #(
 	output     [15:0] rd_q,
 	output reg [15:0] dbg_max_cycles,
 	output reg [15:0] dbg_overruns,
-	output reg [7:0]  dbg_max_hits
+	output reg [7:0]  dbg_max_hits,
+	// savestate: the two vblank stages (the live RAM is the CPU's, saved through
+	// the CPU bus). Image words: 1A000-1B7FF old, big-endian halves of each
+	// longword; 1C000-1DFFF old2, eight words per entry: w0 hi, w0 lo, w1 hi,
+	// w1 lo, w2 hi, w2 lo, then two pad words. The image is written in order,
+	// so a longword (an entry) is staged and written on its last word.
+	input             ss_active,
+	input      [19:0] ss_addr,
+	input             ss_rd,
+	input             ss_wr,
+	input      [15:0] ss_wdata,
+	output reg [15:0] ss_rdata,
+	output reg        ss_ack,
+	output            ss_owns
 );
+	wire ss_old = ss_addr >= 20'h1A000 && ss_addr < 20'h1B800;
+	wire ss_o2  = ss_addr[19:13] == 7'h0E;                   // 1C000-1DFFF
+	assign ss_owns = ss_old | ss_o2;
+	wire [19:0] ss_oi = ss_addr - 20'h1A000;
+	reg  [1:0]  ss_st;
+	reg         ss_sel_o2, ss_ra_on;
+	reg  [2:0]  ss_k;
+	reg         ss_h;
+	reg  [11:0] ss_ra_old;
+	reg  [9:0]  ss_ra_o2;
+	reg  [79:0] ss_stage;
+	reg         ss_old_we, ss_o2_we;
+	reg  [31:0] ss_old_wd;
+	reg  [95:0] ss_o2_wd;
 	// ================================================================ RAMs
 	// live: CPU writes by byte lane (four lane arrays, MS1Z-6); the copy reads it
 	reg  [7:0]  live0 [0:3071], live1 [0:3071], live2 [0:3071], live3 [0:3071];
@@ -86,8 +113,9 @@ module macplus_sprites #(
 	reg         old_we;
 	reg  [31:0] old_wd, old_q;
 	always @(posedge clk) begin
-		if (old_we) old[old_wa] <= old_wd;
-		old_q <= old[old_ra];
+		if (ss_old_we) old[ss_ra_old] <= ss_old_wd;
+		else if (old_we) old[old_wa] <= old_wd;
+		old_q <= old[ss_ra_on ? ss_ra_old : old_ra];
 	end
 
 	// old2: 1,024 x 96, a whole entry per word
@@ -97,8 +125,52 @@ module macplus_sprites #(
 	reg         o2_we;
 	reg  [95:0] o2_wd, o2_q;
 	always @(posedge clk) begin
-		if (o2_we) old2[o2_wa] <= o2_wd;
-		o2_q <= old2[o2_ra];
+		if (ss_o2_we) old2[ss_ra_o2] <= ss_o2_wd;
+		else if (o2_we) old2[o2_wa] <= o2_wd;
+		o2_q <= old2[ss_ra_on ? ss_ra_o2 : o2_ra];
+	end
+
+	// savestate port: address, one clock for the RAM, then the data
+	always @(posedge clk) begin
+		ss_ack <= 1'b0; ss_old_we <= 1'b0; ss_o2_we <= 1'b0;
+		if (reset || !ss_active) begin ss_st <= 2'd0; ss_ra_on <= 1'b0; end
+		else case (ss_st)
+		2'd0: if ((ss_rd || ss_wr) && ss_owns) begin
+			ss_ra_on <= 1'b1; ss_sel_o2 <= ss_o2;
+			ss_ra_old <= ss_oi[12:1]; ss_h <= ss_addr[0];
+			ss_ra_o2 <= ss_addr[12:3]; ss_k <= ss_addr[2:0];
+			if (ss_wr) begin
+				ss_ack <= 1'b1;
+				if (ss_old) begin
+					if (!ss_addr[0]) ss_stage[15:0] <= ss_wdata;
+					else begin ss_old_we <= 1'b1; ss_old_wd <= {ss_stage[15:0], ss_wdata}; end
+				end else case (ss_addr[2:0])
+					3'd0: ss_stage[15:0]  <= ss_wdata;      // w0 hi
+					3'd1: ss_stage[31:16] <= ss_wdata;      // w0 lo
+					3'd2: ss_stage[47:32] <= ss_wdata;      // w1 hi
+					3'd3: ss_stage[63:48] <= ss_wdata;      // w1 lo
+					3'd4: ss_stage[79:64] <= ss_wdata;      // w2 hi
+					3'd5: begin
+						ss_o2_we <= 1'b1;
+						ss_o2_wd <= {ss_stage[79:64], ss_wdata, ss_stage[47:32], ss_stage[63:48], ss_stage[15:0], ss_stage[31:16]};
+					end
+					default: ;
+				endcase
+			end else ss_st <= 2'd1;
+		end
+		2'd1: ss_st <= 2'd2;
+		2'd2: begin
+			ss_ack <= 1'b1; ss_st <= 2'd0;
+			if (!ss_sel_o2) ss_rdata <= ss_h ? old_q[15:0] : old_q[31:16];
+			else case (ss_k)
+				3'd0: ss_rdata <= o2_q[31:16];  3'd1: ss_rdata <= o2_q[15:0];
+				3'd2: ss_rdata <= o2_q[63:48];  3'd3: ss_rdata <= o2_q[47:32];
+				3'd4: ss_rdata <= o2_q[95:80];  3'd5: ss_rdata <= o2_q[79:64];
+				default: ss_rdata <= 16'h0000;
+			endcase
+		end
+		default: ss_st <= 2'd0;
+		endcase
 	end
 
 	// extent table: 256 words of four {valid, top[10:0], end[11:0]}

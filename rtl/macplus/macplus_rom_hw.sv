@@ -22,8 +22,11 @@
 //   kept in a one-qword buffer per bank, since the ES5506 fetches four words
 //   of a line in a row), the copier's reads and the fallback download's
 //   writes. Reads are pipelined (up to 8 in flight) and return in order.
-//   The DDR port yields while `ddr_yield` is high (screen_rotate's write or
-//   the savestate engine).
+//   The DDR port yields while `ddr_yield` is high. screen_rotate's writes
+//   arrive as ddr_busy. The savestate engine is the fifth, lowest-priority
+//   client (ss_ddr_*, already on clk_ddr): its command is issued only with no
+//   read in flight, on a clock ss_ddr_grant is high, and its read's one beat
+//   comes back on ss_ddr_q / ss_ddr_ready.
 // The 48 MHz clients cross to clk_ddr through held request / held
 // acknowledge (4-phase) handshakes with two-flop synchronisers on both
 // levels: the SDC puts the two clocks in exclusive groups (as the siblings'
@@ -94,6 +97,14 @@ module macplus_rom_hw #(
 	output reg [7:0]  ddr_be,
 	input      [63:0] ddr_dout,
 	input             ddr_dout_ready,
+	// savestate engine (clk_ddr): a held command, taken when ss_ddr_grant is high
+	input             ss_ddr_we,
+	input             ss_ddr_rd,
+	input      [28:0] ss_ddr_addr,
+	input      [63:0] ss_ddr_din,
+	output            ss_ddr_grant,
+	output reg [63:0] ss_ddr_q,
+	output reg        ss_ddr_ready,
 	// debug
 	output reg [31:0] dbg_copy_words,
 	output reg [31:0] dbg_dl_bytes
@@ -264,7 +275,13 @@ module macplus_rom_hw #(
 	reg  [2:0]  cp_beats_in;
 	reg        cp_ready96;          // a copier burst is in cp_buf
 	reg        pend_ack_bg, pend_ack_smp;
+	// the command stage's choice, fixed priority BG > samples > copier > fallback > savestate
+	wire cmd_ok   = !((ddr_rd || ddr_we) && ddr_busy) && !ddr_yield && rq_n < 4'd7;
+	wire pick_hi  = (bg_rq && !bg_seen) || (smp_rq && !smp_seen) || (cp_rq && !cp_seen && rq_n == 4'd0)
+	              || (fb_rq && !fb_ack && rq_n == 4'd0);
+	assign ss_ddr_grant = !ddr_por && cmd_ok && !pick_hi && (ss_ddr_we || ss_ddr_rd) && rq_n == 4'd0;
 	always @(posedge clk_ddr) begin
+		ss_ddr_ready <= 1'b0;
 		if (ddr_por) begin
 			ddr_rd <= 1'b0; ddr_we <= 1'b0; rq_wr <= 3'd0; rq_rd <= 3'd0; beat <= 4'd0;
 			bg_ch_ack <= 1'b0; smp_ch_ack <= 1'b0; cp_ch_ack <= 1'b0; fb_ack <= 1'b0;
@@ -277,7 +294,7 @@ module macplus_rom_hw #(
 			if (!fb_rq)     fb_ack <= 1'b0;
 			// command stage (hold while the port is busy)
 			if ((ddr_rd || ddr_we) && !ddr_busy) begin ddr_rd <= 1'b0; ddr_we <= 1'b0; end
-			if (!((ddr_rd || ddr_we) && ddr_busy) && !ddr_yield && rq_n < 4'd7) begin
+			if (cmd_ok) begin
 				if (bg_rq && !bg_seen) begin
 					ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= bg_ch_addr[31:3]; ddr_burstcnt <= 8'd2;
 					rq_ch[rq_wr] <= 2'd0; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 3'd1; bg_seen <= 1'b1;
@@ -294,6 +311,14 @@ module macplus_rom_hw #(
 						ddr_din <= {8{fb_byte}}; ddr_be <= 8'b1 << a[2:0];
 					end
 					fb_ack <= 1'b1;
+				end else if (ss_ddr_grant) begin
+					ddr_addr <= ss_ddr_addr; ddr_burstcnt <= 8'd1;
+					if (ss_ddr_we) begin
+						ddr_we <= 1'b1; ddr_rd <= 1'b0; ddr_din <= ss_ddr_din; ddr_be <= 8'hFF;
+					end else begin
+						ddr_rd <= 1'b1; ddr_we <= 1'b0;
+						rq_ch[rq_wr] <= 2'd3; rq_beats[rq_wr] <= 4'd1; rq_wr <= rq_wr + 3'd1;
+					end
 				end
 			end
 			// data stage
@@ -304,6 +329,7 @@ module macplus_rom_hw #(
 					else begin bg_ch_data[127:64] <= ddr_dout; bg_ch_ack <= 1'b1; end
 				end
 				2'd1: begin smp_ch_q <= ddr_dout; smp_ch_ack <= 1'b1; end
+				2'd3: begin ss_ddr_q <= ddr_dout; ss_ddr_ready <= 1'b1; end
 				2'd2: begin
 					cp_buf[beat[2:0]] <= ddr_dout;
 					if (beat == 4'd7) cp_ch_ack <= 1'b1;
