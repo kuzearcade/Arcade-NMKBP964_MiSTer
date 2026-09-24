@@ -17,6 +17,13 @@
 //                        frames after that resumes. Slots 1 and 2 are one state reached two
 //                        ways: every differing word is named per region, and the K pictures
 //                        after each resume are compared. MP_SS_DUMP=dir writes the slots.
+//   MP_INJECT=dir        (obj_ss) D3 by state injection (MP-13): dir/slots/NNNNN.bin are slots
+//                        tools/mk_inject_image.py built from MAME's machine at frame_done NNNNN.
+//                        From frame MP_INJECT_T0 (300) each is loaded in turn and the work of
+//                        the next MP_INJECT_K (3) handlers is printed ("INJ F j work_us busy_us",
+//                        busy from the release to the vblank for j=0), MAME's on line F+1+j
+//                        of dir/work.txt. The play inputs follow MAME's
+//                        (set at vblank start, as macplus_play.lua sets them at frame_done).
 #ifdef MP_SS
 #include "Vss_top.h"
 typedef Vss_top Top;
@@ -66,7 +73,34 @@ int main(int argc, char **argv) {
 	int ss_step = 0, ss_mark = -1;            // step: 0 save0 1 wait 2 save1 3 wait 4 load0 5 wait 6 save2 7 wait 8 done
 	std::vector<uint64_t> hash_a, hash_b;
 	t->save_req = 0; t->load_req = 0; t->slot = 0;
+	const char *inj_dir = getenv("MP_INJECT");
+	std::vector<int> inj_f;
+	if (inj_dir) {
+		for (int F = 0; F < 100000; F++) {
+			char fn[512]; snprintf(fn, sizeof fn, "%s/slots/%05d.bin", inj_dir, F);
+			if (FILE *f = fopen(fn, "rb")) { inj_f.push_back(F); fclose(f); }
+		}
+		printf("MP_INJECT: %zu states\n", inj_f.size());
+	}
+	int inj_T0 = env("MP_INJECT_T0", 300), inj_K = env("MP_INJECT_K", 3);
+	int inj_st = 0, inj_i = 0, inj_k = 0;
+	uint32_t inj_busy = 0;
 #endif
+	// macplus_play.lua's inputs for play frame F (the frame about to start)
+	auto play_in = [&](int F) -> uint32_t {
+		uint32_t in = 0xFFFFFFFF;
+		if (F >= F0 && F < F0 + 6) in &= ~(1u << 2);                 // coin 1
+		if (F >= F0 + 60 && F < F0 + 66) in &= ~(1u << 0);           // start 1
+		if (F >= F0 + 120) {
+			if ((F % 8) < 4) in &= ~(1u << 20);                      // button 1
+			if ((F % 300) < 4) in &= ~(1u << 21);                    // button 2
+			static const int mv[7][2] = {{-1,-1},{16,-1},{18,-1},{17,-1},{19,-1},{16,19},{17,18}};
+			const int *m = mv[(F / 60) % 7];
+			for (int k = 0; k < 2; k++) if (m[k] >= 0) in &= ~(1u << m[k]);
+			if (quiz) in &= ~(1u << (20 + (F / 30) % 4));
+		}
+		return in;
+	};
 	uint64_t now = 0;
 	std::deque<Req> bgq, sq;
 	int mcount = -1, scount = -1, smpcount = -1;
@@ -79,7 +113,7 @@ int main(int argc, char **argv) {
 	std::vector<uint32_t> fb(384 * 256, 0);
 	int frame = 0, prevv = 0;
 	uint64_t next_audio = 0;
-	unsigned last_idle = 0, last_es = 0, last_lw = 0, last_irq = 0;
+	unsigned last_busy = 0, last_idle = 0, last_es = 0, last_lw = 0, last_irq = 0;
 	t->trace_on = 0;
 	t->quiz = quiz; t->pause = 0; t->flip = getenv("MP_FLIP") ? 1 : 0; t->ram2_sel = 0; t->ram2_we = 0; t->ram2_addr = 0; t->ram2_be = 0; t->ram2_din = 0;
 	t->inputs = 0xFFFFFFFF;
@@ -127,7 +161,10 @@ int main(int argc, char **argv) {
 		if (t->ddr_rd) ddrq.push_back({now + 8, t->ddr_addr & 0x3FFFF});
 		t->ddr_dout_ready = 0;
 		if (!ddrq.empty() && ddrq.front().first <= now) { t->ddr_dout = ddr[ddrq.front().second]; t->ddr_dout_ready = 1; ddrq.pop_front(); }
-		if (t->ss_done_ok || t->ss_done_fail) {
+		if (inj_dir && (t->ss_done_ok || t->ss_done_fail)) {
+			if (t->ss_done_fail) { printf("INJ %d load FAIL (code %d)\n", inj_f[inj_i], t->ss_fail_code); inj_i++; inj_st = 0; }
+			else { inj_st = 2; inj_k = 0; inj_busy = t->dbg_busy; }
+		} else if (t->ss_done_ok || t->ss_done_fail) {
 			printf("SS step %d: %s (fail code %d) at frame %d\n", ss_step, t->ss_done_ok ? "ok" : "FAIL", t->ss_fail_code, frame);
 			if (t->ss_done_fail) { printf("SS gate: FAIL\n"); exit(1); }
 			ss_step++; ss_mark = frame;
@@ -148,19 +185,8 @@ int main(int argc, char **argv) {
 			if (h >= 2 && h <= 385 && v < H) fb[v * 384 + h - 2] = t->rgb;   // rgb is two pixels behind hcount (M1)
 			if (v == 0 && prevv == 255) {
 				if (play) {
-					uint32_t in = 0xFFFFFFFF;
 					int F = frame + 1;                          // the frame about to start
-					if (F >= F0 && F < F0 + 6) in &= ~(1u << 2);                 // coin 1
-					if (F >= F0 + 60 && F < F0 + 66) in &= ~(1u << 0);           // start 1
-					if (F >= F0 + 120) {
-						if ((F % 8) < 4) in &= ~(1u << 20);                      // button 1
-						if ((F % 300) < 4) in &= ~(1u << 21);                    // button 2
-						static const int mv[7][2] = {{-1,-1},{16,-1},{18,-1},{17,-1},{19,-1},{16,19},{17,18}};
-						const int *m = mv[(F / 60) % 7];
-						for (int k = 0; k < 2; k++) if (m[k] >= 0) in &= ~(1u << m[k]);
-						if (quiz) in &= ~(1u << (20 + (F / 30) % 4));
-					}
-					t->inputs = in;
+					t->inputs = play_in(F);
 #ifdef MP_SS
 					if (!quiz && F >= F0 + 120 && !t->ss_busy) {
 #else
@@ -184,12 +210,12 @@ int main(int argc, char **argv) {
 				}
 				if (frame % EVERY == 0) {
 					int nb = 0; for (int i = 0; i < 384 * H; i++) nb += (fb[i] & 0xFFFFFF) != 0;
-					printf("f=%d work_us=%.1f nonblack=%d irq3=%u(+%u) iack3=%u idle=+%u es_w=+%u latch_w=+%u latch_r=%u es_irq=%u spr_over=%u bg_over=%llx cpu=%06x\n",
-					       frame, t->dbg_work / 48.0, nb, t->dbg_irq3, t->dbg_irq3 - last_irq, t->dbg_iack3, t->dbg_idle - last_idle,
+					printf("f=%d busy_us=%.1f work_us=%.1f nonblack=%d irq3=%u(+%u) iack3=%u idle=+%u es_w=+%u latch_w=+%u latch_r=%u es_irq=%u spr_over=%u bg_over=%llx cpu=%06x\n",
+					       frame, (t->dbg_busy - last_busy) / 48.0 / EVERY, t->dbg_work / 48.0, nb, t->dbg_irq3, t->dbg_irq3 - last_irq, t->dbg_iack3, t->dbg_idle - last_idle,
 					       t->dbg_es_writes - last_es, t->dbg_latch_writes - last_lw, t->dbg_latch_reads, t->dbg_es_irq,
 					       t->dbg_spr_overruns, (unsigned long long)t->dbg_bg_overruns, t->dbg_cpu_addr & 0xFFFFFF);
 					fflush(stdout);
-					last_idle = t->dbg_idle; last_es = t->dbg_es_writes; last_lw = t->dbg_latch_writes; last_irq = t->dbg_irq3;
+					last_busy = t->dbg_busy; last_idle = t->dbg_idle; last_es = t->dbg_es_writes; last_lw = t->dbg_latch_writes; last_irq = t->dbg_irq3;
 				}
 #ifdef MP_SS
 				{
@@ -199,7 +225,8 @@ int main(int argc, char **argv) {
 					if (ss_step == 2 && frame > ss_mark) hash_a.push_back(h);
 					if (ss_step == 6 && frame > ss_mark) hash_b.push_back(h);
 					auto req = [&](bool load, int sl) { if (load) t->load_req = 1; else t->save_req = 1; t->slot = sl; ss_step++; };
-					if (ss_step == 0 && frame + 1 == SS_T) req(false, 0);
+					if (inj_dir) {}
+					else if (ss_step == 0 && frame + 1 == SS_T) req(false, 0);
 					else if (ss_step == 2 && frame == ss_mark + SS_K) req(false, 1);
 					else if (ss_step == 4 && frame == ss_mark + 5) req(true, 0);
 					else if (ss_step == 6 && frame == ss_mark + SS_K) req(false, 2);
@@ -209,6 +236,30 @@ int main(int argc, char **argv) {
 				frame++;
 				t->trace_on = (frame == TRF);
 			}
+#ifdef MP_SS
+			if (inj_dir && v == 240 && prevv == 239) {
+				// vblank start: the handler that began at the previous one is done
+				if (inj_st == 2) {
+					int F = inj_f[inj_i];
+					printf("INJ %d %d %.1f %.1f\n", F, inj_k, t->dbg_work / 48.0, (t->dbg_busy - inj_busy) / 48.0); fflush(stdout);
+					inj_busy = t->dbg_busy;
+					inj_k++;
+					t->inputs = play_in(F + 1 + inj_k);
+					if (inj_k == inj_K) { inj_i++; inj_st = 0; }
+				}
+				if (inj_st == 0 && frame >= inj_T0) {
+					if (inj_i == (int)inj_f.size()) frames = frame + 1;
+					else {
+						int F = inj_f[inj_i];
+						char fn[512]; snprintf(fn, sizeof fn, "%s/slots/%05d.bin", inj_dir, F);
+						FILE *f = fopen(fn, "rb"); size_t n = fread(ddr.data(), 8, 0x10000, f); fclose(f);
+						if (n != 0x10000) { printf("short slot %s\n", fn); exit(1); }
+						t->inputs = play_in(F + 1);
+						t->load_req = 1; t->slot = 0; inj_st = 1;
+					}
+				}
+			}
+#endif
 			prevv = v;
 		}
 	}

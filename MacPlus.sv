@@ -442,7 +442,7 @@ savestate #(.SS_WORDS(20'h24900), .DDR_BASE(29'h07C00000), .SLOT_STRIDE(29'h0001
 	.ddr_dout(eng_q), .ddr_dout_ready(eng_ready)
 );
 
-macplus_core #(.CE_NUM(8'd29)) core (
+macplus_core #(.CE_NUM(8'd33)) core (
 	.clk(clk_sys), .reset(core_reset), .quiz(quiz),
 	// the engine masks pause: both CPUs have to execute to reach their monitors
 	.pause((status[29] | hs_pause | ch_pause) & ~ss_busy), .flip(status[17]), .trace_on(1'b0),

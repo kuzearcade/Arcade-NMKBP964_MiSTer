@@ -28,7 +28,8 @@ Where every file came from. Pins are in `deps.lock`.
 | `tools/mister_keys.py`, `frame_compare.py`, `gen_t80_verilog.sh` | Arcade-JalecoMS1Z_MiSTer | verbatim |
 | `tools/gen_autofire_mra.py` | Arcade-JalecoMS1Z_MiSTer | modified: includes Macross Plus; this core's byte-2 note |
 | `tools/mame-patches/macrossp-oracle.patch` | new | `MP_ORACLE=1` removes MAME's speedup and sound-command stall |
-| `sim/oracle/macplus_capture.lua`, `macplus_play.lua`, `macplus_idle.lua` | new | |
+| `sim/oracle/macplus_capture.lua`, `macplus_play.lua`, `macplus_idle.lua`, `macplus_inject.lua` | new | |
+| `tools/mk_inject_image.py`, `d3_inject_compare.py` | new | D3 by state injection (MP-13) |
 | `sim/rtl/video_state/` | new | M1 |
 | `sim/rtl/macplus_frames/` | new | M2; `ss_top.sv` + `MP_SS` is the savestate gate (M5) |
 | `sim/models/sdram_model.sv` | Arcade-JalecoMS1Z_MiSTer | verbatim (for M3) |

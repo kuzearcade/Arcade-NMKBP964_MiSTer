@@ -292,7 +292,7 @@ set_global_assignment -name VERILOG_MACRO "MISTER_FB=1"
 # Seed 11 closes it: worst-case setup +0.460, hold +0.248, recovery +3.851,
 # removal +0.653, no violations anywhere. clk_sys goes to +4.116 as a bonus.
 # (11 is also what NMK16 settled on, for its own unrelated reasons.)
-set_global_assignment -name SEED 11
+set_global_assignment -name SEED 12
 
 
 # TG68K's register file is an asynchronous-read array; inferred as an M10K with

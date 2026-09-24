@@ -2,7 +2,9 @@
 // and the savestate engine (VARLAT=1) with its DDR port brought out to the
 // C++ model. The core's ports pass through under their own names (generated
 // from macplus_core's port list by gen_ss_top.py; rerun it when those change).
-module ss_top (
+module ss_top #(
+	parameter [7:0] CE_NUM = 8'd29            // the main CPU's clock enable, /48 (D3)
+) (
 	input             clk,
 	input             reset,
 	input             quiz,
@@ -54,6 +56,7 @@ module ss_top (
 	output     [31:0] dbg_iack3,
 	output     [31:0] dbg_idle,
 	output     [31:0] dbg_work,
+	output     [31:0] dbg_busy,
 	input             trace_on,
 	output     [31:0] dbg_es_writes,
 	output     [31:0] dbg_es_irq,
@@ -80,7 +83,7 @@ module ss_top (
 	wire        ss_freeze, ss_resume, ss_active, ss_rd, ss_wr, ss_ack, ss_frozen, ss_parked, ss_replay, ss_replay_done;
 	wire [19:0] ss_addr;
 	wire [15:0] ss_rdata, ss_wdata;
-	macplus_core u_core (.*);
+	macplus_core #(.CE_NUM(CE_NUM)) u_core (.*);
 	savestate #(.SS_WORDS(20'h24900), .DDR_BASE(29'd0), .SLOT_STRIDE(29'h10000), .VARLAT(1)) u_ss (
 		.clk(clk), .reset(reset), .save_req(save_req), .load_req(load_req), .slot(slot), .vblank(vblank), .allow(!reset),
 		.ss_freeze(ss_freeze), .ss_frozen(ss_frozen), .ss_parked(ss_parked), .ss_resume(ss_resume), .ss_active(ss_active),

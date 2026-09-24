@@ -11,7 +11,7 @@ for line in body.split('\n'):
     if l.split()[-1].startswith('ss_'): continue
     ports.append('\t' + l.replace('output reg', 'output'))
 top = open('ss_top.sv').read()
-a = top.index('module ss_top (\n') + len('module ss_top (\n')
+a = top.index(') (\n', top.index('module ss_top')) + len(') (\n')
 b = top.index('\tinput             save_req')
 open('ss_top.sv', 'w').write(top[:a] + ',\n'.join(ports) + ',\n' + top[b:])
 print(len(ports), 'ports')

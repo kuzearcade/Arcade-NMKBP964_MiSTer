@@ -47,3 +47,14 @@ OSD settings go in as `config/<set>.CFG`, the 16-byte status word.
 
 The board was left at defaults: CFGs zeroed, no `.dip`, the test `.mra`
 directory removed, the original `.nvm` restored.
+
+## 2026-09-24 — sprite rows from DDR3, CPU at 33/48 (`dfd68645...`)
+
+Timing met (worst setup slack +0.200 ns, fitter seed 12; seed 11 missed by
+0.070 ns on the framework's HDMI clock). 35,957 ALMs (86 %), 550 / 553 M10K.
+
+| check | result |
+|---|---|
+| Boot | the 6 MB copy (MP-14): the screenshot at 9 s equals MAME's attract picture 43, 0 pixels differ (the 22 MB copy needed 11 s) |
+| Savestate round trip | 0 pixels between after-save and after-load |
+| Explosions (MP-14) | 45 s of play with autofire: the explosion captures are solid, no line gaps (the interim `8960a7b6...` build showed the same) |

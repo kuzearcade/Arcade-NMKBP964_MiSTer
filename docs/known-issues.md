@@ -144,7 +144,7 @@ The harness also measured the output latency: `rgb` is two pixels behind
 `hcount` (the MS1-59 alignment). `sim/rtl/macplus_frames` uses the same
 offset.
 
-## MP-6 — The CPU's bus path was 2.4x slower than MAME's 68020 (fixed; D3 calibration open, see the end)
+## MP-6 — The CPU's bus path was 2.4x slower than MAME's 68020 (fixed; D3 closed by MP-13)
 
 The whole board boots from reset in `sim/rtl/macplus_frames`:
 - TG68K runs the game and IRQ3 is acknowledged every frame;
@@ -437,3 +437,113 @@ On the board (bitstream md5 `fe3887a4...`; timing met; 35,605 ALMs (85 %),
   to the one 1 s after the save (0 of 92,160 pixels; the scene between them
   differed by 77,313);
 - the attract then went on from the restored point.
+
+## MP-13 — D3: the main CPU runs at 33/48, set by MAME state injection (closed, measured)
+
+MP-6's gameplay comparison failed because the two machines drift apart within
+a few frames, and because `work` (IRQ3 to the first idle-loop write) measures
+where the interrupt lands in the game's logic, not how much logic there is:
+light frames are the handler alone (~380 µs), heavy ones the rest of a logic
+pass the interrupt cut into.
+
+**The measure: busy time.** Busy is the time per frame outside the idle loop:
+the sum of the gaps longer than 5 µs between the loop's writes to F1015A,
+which it makes about every 1 µs. A gap still open at vblank is split there.
+MAME measures it in `sim/oracle/macplus_inject.lua`, the core with
+`macplus_main.dbg_busy` (held through savestates). It is smooth frame to
+frame: 5.5-9 ms in play, 634 µs on the static attract screen.
+
+**The comparison: the same state on both machines.**
+1. `macplus_inject.lua` plays MAME (`MP_ORACLE=1`, perfect quantum, the play
+   script) and dumps its machine at frame_done every 20th frame from 700:
+   main RAM, video state and every CPU register.
+2. `tools/mk_inject_image.py` makes a savestate slot of each. A core slot
+   supplies the sound board, and the 68020's registers go on the stack the
+   park monitor pops.
+3. The harness (`MP_INJECT`, `obj_ssNN` built at CE NN/48) loads each slot
+   and measures the next three frames against MAME's frames F+1..F+3, with
+   MAME's inputs, set at vblank.
+
+That is 115 states and 327 frame pairs, with fully busy frames (stage loads)
+left out. The second and third frames agree with the first, so the machines
+stay together.
+
+**Memory latency matters.** A first set at the frames harness's 3-clock ROM
+latency gave 25/48, but the board's program ROM comes through SDRAM. The M3
+harness (`macplus_rom_hw`, `sdram.sv`) measures its fill requests at a mean
+of 14 clocks (maximum 21), and the runs below use `MP_MLAT=13` to match:
+
+| CE / 48 | core / MAME busy, median | summed | mean abs(r-1) | static screen busy (MAME 634 µs) |
+|---|---|---|---|---|
+| 29 | 1.046 | 1.026 | 0.063 | 652 µs |
+| 31 | 0.997 | 0.957 | 0.070 | 621 µs |
+| 32 | 0.969 | 0.896 | 0.113 | |
+| **33** | **1.017** | **0.998** | **0.052** | **635 µs** |
+| 34 | 1.065 | 1.044 | 0.073 | |
+| 35 | 1.118 | 1.085 | 0.126 | 702 µs |
+| 36 | 1.184 | 1.163 | 0.175 | 746 µs |
+
+**33/48 is the setting** (`MacPlus.sv`): the static handler within 0.2 %
+and gameplay within 2 % (median) / 0.2 % (sum).
+
+The table is not monotonic, and that is real: the static screen, with no
+injection involved, shows it, and so does the idle loop's rate (20,020 /
+20,985 / 21,863 / 18,869 / 17,369 iterations a frame at 29 / 31 / 33 / 35 / 36;
+MAME 20,042). Above about 33/48 each bus access costs more: the
+`macplus_cpu_bus` / TG68K handshake loses efficiency when the enable is
+dense. 33 is below that knee. (32/48's figures include harness artefacts: a
+release racing the vblank sample made some first frames read 0.)
+
+Caveats:
+- The oracle is MAME's 68020 timing model, not a measured board.
+- The ROM latency is the attract's; busier play adds SDRAM contention.
+- The sound board in the injected slots is the core's own, from the attract.
+
+## MP-14 — Lines through exploding sprites: sprite rows were fetched one at a time (fixed)
+
+Reported on the board: enemy sprites showed horizontal lines when they
+exploded.
+
+**Cause.** On the board, sprite rows came from SDRAM port 2:
+- each 16-byte row as four single-word pair reads, one after another, one
+  row at a time;
+- at the ~14 clocks a read measured on the port-0 path, about 60 clocks a
+  row, or about 50 rows in a 3,125-clock line.
+
+The dense lines need more: in the play capture, 27 of 940 sampled frames have
+a line over 45 tile columns (one row fetch each), and the worst has 63
+(frames 3845-3850, 3090-3115, 4740: explosions, whose sprites are zoomed).
+The line renderer runs out of time and leaves the rest of that line's sprites
+out. The reference harnesses served rows pipelined, so M1/M2 never saw it.
+
+**Reproduced.** M1 with `MP_SPR_SERIAL=60`, a board-like fetch, on the ten
+heaviest frames:
+- 8-32 overrun lines a frame, 228-1,793 wrong pixels each;
+- the difference is exactly horizontal line segments through the explosion
+  and the player's ship;
+- the default pipelined service is exact on the same frames.
+
+**Fix.** `macplus_rom_hw` now reads sprite rows from DDR3, where the image
+already holds them, as a fifth DDR3 channel just below BG priority, with up
+to 7 rows in flight:
+- the 48 MHz request queue is read on clk_ddr through its Gray-coded write
+  pointer;
+- each row is one 2-beat read into an 8-row return ring, whose Gray-coded
+  write pointer crosses back;
+- both sides reset on power-on only, so the two rings stay in step;
+- the ring is in registers (M10K is at 550 / 553).
+
+SDRAM port 2 is idle now. The boot copy shrinks from 22 MB to the 6 MB that
+SDRAM still serves (program, sound program, text).
+
+**Checked:**
+- M1 with at most 7 rows in flight (`MP_SPR_DEPTH=7`) at 60 and 100 clocks
+  of latency: all heavy frames exact, worst line 1,803 of 3,125 clocks.
+- M3 (`MP_PLAY=1`, the real `macplus_rom_hw`, to frame 820): 670,768 sprite
+  rows, 0 differ from the image; no sprite or BG overruns.
+- Board (`8960a7b6`): 30 s of play with autofire, the six captures with the
+  most explosion show solid explosions with no gaps.
+
+MP-8's BG path still crosses one row at a time. It is in time on every M3
+frame so far, and the same ring would lift it if a zoomed scene ever
+overruns.

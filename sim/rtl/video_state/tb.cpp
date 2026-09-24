@@ -28,6 +28,12 @@ int main(int argc, char **argv) {
 	// MP_RDY=n: accept requests only on every n-th clock, so the engines stall
 	// with a request pending, as they do behind macplus_rom_hw (MP-9)
 	int RDY = getenv("MP_RDY") ? atoi(getenv("MP_RDY")) : 1;
+	// MP_SPR_SERIAL=n: sprite rows one at a time, each answered n clocks after
+	// it is accepted, as macplus_rom_hw's port-2 fetcher does (four SDRAM pair
+	// reads in turn per 16-byte row)
+	int SPR_SERIAL = getenv("MP_SPR_SERIAL") ? atoi(getenv("MP_SPR_SERIAL")) : 0;
+	// MP_SPR_DEPTH=d: at most d sprite rows in flight (macplus_rom_hw's queue holds 7)
+	size_t SPR_DEPTH = getenv("MP_SPR_DEPTH") ? atoi(getenv("MP_SPR_DEPTH")) : 1u << 30;
 	std::vector<uint8_t> bg[3] = {slurp(img + "/bg0.bin"), slurp(img + "/bg1.bin"), slurp(img + "/bg2.bin")};
 	std::vector<uint8_t> fg = slurp(img + "/fg.bin"), spr = slurp(img + "/spr.bin");
 	int total_bad = 0;
@@ -49,13 +55,14 @@ int main(int argc, char **argv) {
 		auto tick = [&]() {
 			// requests: accept each stream's request every clock it is raised
 			bool rdy = (now % RDY) == 0;
-			t->bg_ready = rdy ? 0xF : 0; t->spr_ready = rdy;
+			bool spr_rdy = SPR_SERIAL ? sq.empty() : (rdy && sq.size() < SPR_DEPTH);
+			t->bg_ready = rdy ? 0xF : 0; t->spr_ready = spr_rdy;
 			t->clk = 0; t->eval();
 			for (int s = 0; s < 4; s++) if (rdy && (t->bg_req >> s & 1)) {
 				uint32_t a = 0; for (int b = 0; b < 23; b++) a |= ((t->bg_addr[(s*23+b)/32] >> ((s*23+b)%32)) & 1u) << b;
 				bgq.push_back({now + LAT, s, a});
 			}
-			if (rdy && t->spr_req) sq.push_back({now + LAT, 4, t->spr_addr});
+			if (spr_rdy && t->spr_req) sq.push_back({now + (SPR_SERIAL ? SPR_SERIAL : LAT), 4, t->spr_addr});
 			// responses (set up before the rising edge)
 			t->bg_valid = 0; t->spr_valid = 0;
 			if (!bgq.empty() && bgq.front().due <= now) {

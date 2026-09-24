@@ -14,7 +14,7 @@
 // siblings' convention; a read returns the aligned pair {word|1, word&~1}):
 //   port 0  main-CPU cache fills (one pair = one big-endian longword) + copier
 //   port 1  sound-CPU program, through rom_cache_n
-//   port 2  sprite rows, 16 bytes = four pair reads
+//   port 2  unused (sprite rows come from DDR3, MP-14)
 //   port 3  text rows, 8 bytes = two pair reads
 // DDR3 (64-bit words, byte k in bits [8k+7:8k]), on clk_ddr (96 MHz, the
 // video clock screen_rotate drives DDRAM with):
@@ -34,7 +34,9 @@
 // whenever the level that announces them is.
 module macplus_rom_hw #(
 	parameter [31:0] DDR_BASE = 32'h3000_0000,
-	parameter [24:0] COPY_BYTES = 25'h1600000
+	// the copy covers the program, sound program and text regions; sprite rows
+	// are read from DDR3 (MP-14), so the 16 MB sprite region is not copied
+	parameter [24:0] COPY_BYTES = 25'h0600000
 ) (
 	input             clk,            // 48 MHz
 	input             clk_ddr,        // 96 MHz
@@ -265,7 +267,14 @@ module macplus_rom_hw #(
 	// ================================================================ DDR3 master (96 MHz)
 	// Command issue: fixed priority BG > samples > copier > fallback write.
 	// Reads are tagged into an in-order queue; beats return in command order.
-	reg  [1:0] rq_ch [0:7];
+	reg  [2:0] rq_ch [0:7];
+	// sprite rows (MP-14): the 48 MHz queue's write pointer, synchronised
+	reg  [2:0]  sqw_s1, sqw_s2;
+	reg  [2:0]  sp_iss;                     // rows issued to DDR3
+	reg  [2:0]  rbw, rbw_g;                 // rows written into rbuf, and in Gray code
+	reg  [63:0] sp_lo;
+	wire [2:0]  sqw_d = gray2bin(sqw_s2);
+	wire        spr_rq = sp_iss != sqw_d;
 	reg  [3:0] rq_beats [0:7];
 	reg  [2:0] rq_wr, rq_rd;
 	wire [3:0] rq_n = {1'b0, rq_wr} - {1'b0, rq_rd};
@@ -277,12 +286,14 @@ module macplus_rom_hw #(
 	reg        pend_ack_bg, pend_ack_smp;
 	// the command stage's choice, fixed priority BG > samples > copier > fallback > savestate
 	wire cmd_ok   = !((ddr_rd || ddr_we) && ddr_busy) && !ddr_yield && rq_n < 4'd7;
-	wire pick_hi  = (bg_rq && !bg_seen) || (smp_rq && !smp_seen) || (cp_rq && !cp_seen && rq_n == 4'd0)
+	wire pick_hi  = (bg_rq && !bg_seen) || spr_rq || (smp_rq && !smp_seen) || (cp_rq && !cp_seen && rq_n == 4'd0)
 	              || (fb_rq && !fb_ack && rq_n == 4'd0);
 	assign ss_ddr_grant = !ddr_por && cmd_ok && !pick_hi && (ss_ddr_we || ss_ddr_rd) && rq_n == 4'd0;
 	always @(posedge clk_ddr) begin
 		ss_ddr_ready <= 1'b0;
+		{sqw_s2, sqw_s1} <= {sqw_s1, sqw_g};
 		if (ddr_por) begin
+			sp_iss <= 3'd0; rbw <= 3'd0; rbw_g <= 3'd0;
 			ddr_rd <= 1'b0; ddr_we <= 1'b0; rq_wr <= 3'd0; rq_rd <= 3'd0; beat <= 4'd0;
 			bg_ch_ack <= 1'b0; smp_ch_ack <= 1'b0; cp_ch_ack <= 1'b0; fb_ack <= 1'b0;
 			bg_seen <= 1'b0; smp_seen <= 1'b0; cp_seen <= 1'b0;
@@ -298,6 +309,12 @@ module macplus_rom_hw #(
 				if (bg_rq && !bg_seen) begin
 					ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= bg_ch_addr[31:3]; ddr_burstcnt <= 8'd2;
 					rq_ch[rq_wr] <= 2'd0; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 3'd1; bg_seen <= 1'b1;
+				end else if (spr_rq) begin
+					begin : spra
+						reg [31:0] a; a = DDR_BASE + 32'h600000 + {8'd0, sq_a[sp_iss]};
+						ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= a[31:3]; ddr_burstcnt <= 8'd2;
+					end
+					rq_ch[rq_wr] <= 3'd4; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 3'd1; sp_iss <= sp_iss + 3'd1;
 				end else if (smp_rq && !smp_seen) begin
 					ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= smp_ch_addr[31:3]; ddr_burstcnt <= 8'd1;
 					rq_ch[rq_wr] <= 2'd1; rq_beats[rq_wr] <= 4'd1; rq_wr <= rq_wr + 3'd1; smp_seen <= 1'b1;
@@ -330,6 +347,13 @@ module macplus_rom_hw #(
 				end
 				2'd1: begin smp_ch_q <= ddr_dout; smp_ch_ack <= 1'b1; end
 				2'd3: begin ss_ddr_q <= ddr_dout; ss_ddr_ready <= 1'b1; end
+				3'd4: begin
+					if (beat == 4'd0) sp_lo <= ddr_dout;
+					else begin
+						rbuf[rbw] <= {ddr_dout, sp_lo}; rbw <= rbw + 3'd1;
+						rbw_g <= (rbw + 3'd1) ^ ((rbw + 3'd1) >> 1);
+					end
+				end
 				2'd2: begin
 					cp_buf[beat[2:0]] <= ddr_dout;
 					if (beat == 4'd7) cp_ch_ack <= 1'b1;
@@ -442,36 +466,44 @@ module macplus_rom_hw #(
 	wire [15:0] p3_din [0:0];   wire p3_req [0:0]; wire p3_busy [0:0]; wire p3_valid [0:0];
 	wire [15:0] p3_dout [0:0];  wire [31:0] p3_pair [0:0];
 
-	// sprite rows: image 0x600000 + addr; queue of up to 8
-	reg [23:0] sq_a [0:7];
-	reg [2:0]  sqw, sqr;
-	wire [3:0] sq_n = {1'b0, sqw} - {1'b0, sqr};
-	reg        sp_act, sp_req;
-	reg [1:0]  sp_k;
-	reg [24:0] sp_base;
-	reg [95:0] sp_acc;
+	// sprite rows (MP-14): image 0x600000 + addr, read from DDR3 with up to 7
+	// rows in flight. The request queue (48 MHz) is read by the DDR3 side
+	// through its Gray-coded write pointer; each row's 16 bytes go into the
+	// return ring rbuf[] (written on clk_ddr) and cross back through that
+	// ring's Gray-coded write pointer. Slot k of both belongs to request k, and
+	// a request is only accepted while fewer than 7 are unconsumed, so no slot
+	// is reused before the 48 MHz side has taken it. Both sides write a slot's
+	// data on the edge that advances the pointer announcing it, and the two-flop
+	// synchroniser delays the pointer, so the data is stable when it is read.
+	reg [23:0]  sq_a [0:7];
+	reg [2:0]   sqw, sqc;                   // requests written, results consumed (48 MHz)
+	reg [2:0]   sqw_g;                      // sqw in Gray code, for clk_ddr
+	reg [2:0]   rbw_s1, rbw_s2;             // the ring's write pointer (Gray), synchronised to 48 MHz
+	(* ramstyle = "logic" *) reg [127:0] rbuf [0:7];   // written on clk_ddr; registers, M10K is full
+	wire [2:0]  rbw_b = gray2bin(rbw_s2);
+	wire [3:0]  sq_n  = {1'b0, sqw} - {1'b0, sqc};
+	function [2:0] gray2bin(input [2:0] g);
+		gray2bin = {g[2], g[2] ^ g[1], g[2] ^ g[1] ^ g[0]};
+	endfunction
 	always @(posedge clk) begin
 		spr_ready <= 1'b0; spr_valid <= 1'b0;
-		if (reset || !rom_ready) begin sqw <= 3'd0; sqr <= 3'd0; sp_act <= 1'b0; sp_req <= 1'b0; end
+		{rbw_s2, rbw_s1} <= {rbw_s1, rbw_g};
+		// power-on reset only, like the DDR3 side's pointers (ddr_por): a reset
+		// of one side alone would desynchronise the ring. The engine does not
+		// request while the core is held, and late results are simply consumed.
+		if (pwr_reset) begin sqw <= 3'd0; sqc <= 3'd0; sqw_g <= 3'd0; end
 		else begin
-			if (spr_req && !spr_ready && sq_n < 4'd7) begin sq_a[sqw] <= spr_addr; sqw <= sqw + 3'd1; spr_ready <= 1'b1; end
-			if (!sp_act && sqr != sqw) begin
-				sp_act <= 1'b1; sp_k <= 2'd0; sp_base <= 25'h600000 + {1'b0, sq_a[sqr]}; sqr <= sqr + 3'd1; sp_req <= 1'b1;
-			end else if (sp_act && sp_req && p2_valid[0]) begin
-				sp_req <= 1'b0;
-				case (sp_k)
-				2'd0: sp_acc[31:0]  <= p2_pair[0];
-				2'd1: sp_acc[63:32] <= p2_pair[0];
-				2'd2: sp_acc[95:64] <= p2_pair[0];
-				2'd3: begin spr_data <= {p2_pair[0], sp_acc}; spr_valid <= 1'b1; sp_act <= 1'b0; end
-				endcase
-				sp_k <= sp_k + 2'd1;
-			end else if (sp_act && !sp_req) sp_req <= 1'b1;        // next pair (req low one clock between)
+			if (spr_req && !spr_ready && sq_n < 4'd7) begin
+				sq_a[sqw] <= spr_addr; sqw <= sqw + 3'd1;
+				sqw_g <= (sqw + 3'd1) ^ ((sqw + 3'd1) >> 1);
+				spr_ready <= 1'b1;
+			end
+			if (sqc != rbw_b) begin spr_data <= rbuf[sqc]; spr_valid <= 1'b1; sqc <= sqc + 3'd1; end
 		end
 	end
-	assign p2_addr[0] = {sp_base[24:4], sp_k, 1'b0};
+	assign p2_addr[0] = 24'd0;
 	assign p2_we[0] = 1'b0; assign p2_wrl[0] = 1'b0; assign p2_wrh[0] = 1'b0; assign p2_din[0] = 16'd0;
-	assign p2_req[0] = sp_req;
+	assign p2_req[0] = 1'b0;
 
 	// text rows: image 0x500000 + addr (8 bytes); accepted and answered by the
 	// BG front end on bg_ready[3] / bg_valid[3]

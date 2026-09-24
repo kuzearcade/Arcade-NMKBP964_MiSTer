@@ -34,8 +34,9 @@
 //   24800        {toggle, irq3, fade}        24880-24883  SSP, USP
 //
 // The CPU advances on cpu_ce, a rational fraction CE_NUM/CE_DEN of clk_sys:
-// 25/48 is a 25 MHz 68EC020's clock, but TG68K is not cycle-exact, and D3 sets
-// the ratio from the per-frame CPU work measured against MAME (M2 gate 3).
+// 25/48 is a 25 MHz 68EC020's clock, but TG68K is not cycle-exact. D3 set the
+// board's value, 33/48 (MacPlus.sv), from busy time against MAME on injected
+// MAME states (docs/known-issues.md MP-13); the default here is only nominal.
 module macplus_main #(
 	parameter [7:0] CE_NUM = 8'd25,
 	parameter [7:0] CE_DEN = 8'd48
@@ -81,6 +82,7 @@ module macplus_main #(
 	// D3: clk_sys cycles from vblank start to the game's first idle-loop write
 	// that frame (its work time); 0 if it never idled
 	output reg [31:0] dbg_work,
+	output reg [31:0] dbg_busy,      // clocks outside the idle loop, cumulative (D3, MP-13)
 	input             trace_on,
 	// savestate
 	input             ss_park_req,
@@ -226,6 +228,21 @@ module macplus_main #(
 			work_cnt <= work_cnt + 32'd1;
 			if (idle_pulse) begin dbg_work <= work_cnt; work_armed <= 1'b0; end
 		end
+	end
+
+	// D3's busy time (MP-13): the sum of the gaps between idle-loop counter
+	// writes longer than 5 us (240 clocks; the loop writes about every 1 us),
+	// a gap still open at vblank split there. macplus_inject.lua measures
+	// MAME the same way. Unlike dbg_work it does not depend on where the
+	// interrupt lands in the game's logic.
+	reg [31:0] busy_gap;
+	always @(posedge clk) begin
+		if (reset) begin busy_gap <= 32'd0; dbg_busy <= 32'd0; end
+		else if (ss_park_req) busy_gap <= 32'd0;      // a savestate hold is not work
+		else if (idle_pulse || vblank_start) begin
+			if (busy_gap > 32'd240) dbg_busy <= dbg_busy + busy_gap;
+			busy_gap <= 32'd0;
+		end else busy_gap <= busy_gap + 32'd1;
 	end
 
 	// ---------------------------------------------------------------- IRQ3

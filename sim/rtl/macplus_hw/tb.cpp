@@ -113,11 +113,11 @@ int main(int argc, char **argv) {
 			// (with MP_PRELOAD this checks the preload)
 			auto &mem = t->rootp->hw_top__DOT__u_model__DOT__mem;
 			long bad = 0, first = -1;
-			for (long k = 0; k < 0x1600000 / 2; k++) {
+			for (long k = 0; k < 0x600000 / 2; k++) {
 				uint16_t want = ddr[2*k] | ddr[2*k+1] << 8;
 				if (mem[k] != want) { if (first < 0) first = k; bad++; }
 			}
-			printf("copy check: %ld of %d words differ, first at byte 0x%lx\n", bad, 0x1600000 / 2, first * 2);
+			printf("copy check: %ld of %d words differ, first at byte 0x%lx\n", bad, 0x600000 / 2, first * 2);
 			if (first >= 0) for (long k = first; k < first + 8; k++) printf("  byte 0x%lx: sdram %04x image %02x%02x\n", k*2, mem[k], ddr[2*k+1], ddr[2*k]);
 			fflush(stdout);
 		}
@@ -135,10 +135,26 @@ int main(int argc, char **argv) {
 					fflush(stdout); last_idle = t->dbg_idle; last_es = t->dbg_es_writes;
 				}
 				frame++;
+				if (getenv("MP_PLAY")) {
+					// macplus_play.lua's inputs for the frame about to start (no cheat pokes)
+					int F = frame, F0 = env("MP_PLAY_FROM", 600); uint32_t in = 0xFFFFFFFF;
+					if (F >= F0 && F < F0 + 6) in &= ~(1u << 2);
+					if (F >= F0 + 60 && F < F0 + 66) in &= ~(1u << 0);
+					if (F >= F0 + 120) {
+						if ((F % 8) < 4) in &= ~(1u << 20);
+						if ((F % 300) < 4) in &= ~(1u << 21);
+						static const int mv[7][2] = {{-1,-1},{16,-1},{18,-1},{17,-1},{19,-1},{16,19},{17,18}};
+						const int *m = mv[(F / 60) % 7];
+						for (int k = 0; k < 2; k++) if (m[k] >= 0) in &= ~(1u << m[k]);
+					}
+					t->inputs = in;
+				}
 			}
 			prevv = v;
 		}
 	}
+	printf("program ROM: %u requests, mean latency %.2f clocks, max %u\n", t->dbg_mlat_n,
+	       t->dbg_mlat_n ? (double)t->dbg_mlat_sum / t->dbg_mlat_n : 0.0, t->dbg_mlat_max);
 	printf("stream check: sprite %ld of %ld bad; BG %ld/%ld %ld/%ld %ld/%ld, text %ld/%ld bad\n", spr_bad, spr_n,
 	       bg_bad[0], bg_n[0], bg_bad[1], bg_n[1], bg_bad[2], bg_n[2], bg_bad[3], bg_n[3]);
 	delete t;

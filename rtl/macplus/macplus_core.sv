@@ -76,6 +76,7 @@ module macplus_core #(
 	output     [31:0] dbg_iack3,
 	output     [31:0] dbg_idle,
 	output     [31:0] dbg_work,
+	output     [31:0] dbg_busy,
 	input             trace_on,      // simulation only: log main-CPU bus cycles
 	output     [31:0] dbg_es_writes,
 	output     [31:0] dbg_es_irq,
@@ -145,7 +146,7 @@ module macplus_core #(
 		.inputs(inputs), .dsw(dsw), .vblank_start(vblank_start_g),
 		.snd_cmd_we(snd_cmd_we), .snd_cmd(snd_cmd), .snd_pending(snd_pending),
 		.ram2_sel(ram2_sel), .ram2_addr(ram2_addr), .ram2_we(ram2_we), .ram2_be(ram2_be), .ram2_din(ram2_din), .ram2_dout(ram2_dout),
-		.dbg_pc_addr(dbg_cpu_addr), .dbg_irq3(dbg_irq3), .dbg_iack3(dbg_iack3), .dbg_idle(dbg_idle), .dbg_cache_miss(), .dbg_work(dbg_work), .trace_on(trace_on),
+		.dbg_pc_addr(dbg_cpu_addr), .dbg_irq3(dbg_irq3), .dbg_iack3(dbg_iack3), .dbg_idle(dbg_idle), .dbg_cache_miss(), .dbg_work(dbg_work), .dbg_busy(dbg_busy), .trace_on(trace_on),
 		.ss_park_req(ss_freeze), .ss_resume(ss_resume), .ss_active(ss_active), .ss_addr(ss_addr), .ss_rd(ss_rd), .ss_wr(ss_wr),
 		.ss_wdata(ss_wdata), .ss_rdata(m_rdata), .ss_ack(m_ack), .ss_owns(m_owns), .ss_parked(m_parked));
 

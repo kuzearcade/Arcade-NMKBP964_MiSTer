@@ -5,7 +5,7 @@ module hw_top #(
 	// COPY_BYTES < 0x1600000 (the "fast" build): the testbench preloads the SDRAM
 	// model with the image instead; the full copy is checked word for word in
 	// the normal build (MP-9 notes).
-	parameter [24:0] COPY_BYTES = 25'h1600000
+	parameter [24:0] COPY_BYTES = 25'h0600000
 ) (
 	input             clk_sys,
 	input             clk_ram,
@@ -33,6 +33,8 @@ module hw_top #(
 	output     [31:0] dbg_copy_words, dbg_irq3, dbg_idle, dbg_es_writes, dbg_latch_writes, dbg_cpu_addr,
 	output     [15:0] dbg_spr_overruns,
 	output     [63:0] dbg_bg_overruns,
+	// program-ROM request latency (D3, MP-13): clocks from mrom_req's rise to mrom_ack
+	output reg [31:0] dbg_mlat_sum, dbg_mlat_n, dbg_mlat_max,
 	// the ROM streams, for the testbench's response check
 	output            t_spr_req, t_spr_ready, t_spr_valid,
 	output     [23:0] t_spr_addr,
@@ -106,4 +108,15 @@ module hw_top #(
 		.dbg_irq3(dbg_irq3), .dbg_iack3(), .dbg_idle(dbg_idle), .dbg_es_writes(dbg_es_writes), .dbg_es_irq(),
 		.dbg_latch_reads(), .dbg_latch_writes(dbg_latch_writes), .dbg_cpu_addr(dbg_cpu_addr),
 		.dbg_spr_max_cycles(), .dbg_spr_overruns(dbg_spr_overruns), .dbg_bg_overruns(dbg_bg_overruns));
+	reg        mreq_d;
+	reg [31:0] mlat;
+	always @(posedge clk_sys) begin
+		mreq_d <= mrom_req;
+		if (reset) begin dbg_mlat_sum <= 0; dbg_mlat_n <= 0; dbg_mlat_max <= 0; mlat <= 0; end
+		else if (mrom_req && !mreq_d) mlat <= 32'd1;
+		else if (mrom_req && mrom_ack) begin
+			dbg_mlat_sum <= dbg_mlat_sum + mlat; dbg_mlat_n <= dbg_mlat_n + 1;
+			if (mlat > dbg_mlat_max) dbg_mlat_max <= mlat;
+		end else if (mrom_req) mlat <= mlat + 32'd1;
+	end
 endmodule
