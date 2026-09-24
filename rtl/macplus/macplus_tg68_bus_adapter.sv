@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // From Arcade-ITech32_MiSTer (TheJesusFish), rtl/itech32/itech32_tg68_bus_adapter.sv
-// at d461e21d. Local changes for Arcade-NMKMacPlus_MiSTer: renamed; the
+// at d461e21d. Local changes for Arcade-NMKBP964_MiSTer: renamed; the
 // reset-vector shadow at 0x00-0x7F is a parameter (VECTOR_SHADOW, off here:
 // this board's vectors are in ROM); the locally completed IACK cycle is
 // exported as a one-clock `iack` with its level, so the board can retire a

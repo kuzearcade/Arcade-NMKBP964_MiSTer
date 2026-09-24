@@ -1,4 +1,4 @@
-# Arcade-NMKMacPlus_MiSTer timing constraints, derived from JalecoMS1Z.sdc.
+# Arcade-NMKBP964_MiSTer timing constraints, derived from JalecoMS1Z.sdc.
 
 #
 # sys/sys_top.sdc is the MiSTer framework's own base file (root clocks,

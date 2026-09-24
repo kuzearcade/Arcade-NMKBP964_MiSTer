@@ -1,4 +1,4 @@
-# Arcade-NMKMacPlus_MiSTer — Project Plan (approved 2026-09-23; implementation under way)
+# Arcade-NMKBP964_MiSTer — Project Plan (approved 2026-09-23; implementation under way)
 
 **Macross Plus** (MOSS / Banpresto, 1996) and **Quiz Bishoujo Senshi Sailor
 Moon - Chiryoku Tairyoku Toki no Un** (Banpresto, 1997) as a MiSTer FPGA core.
@@ -12,7 +12,7 @@ board, and MAME is the behavioural oracle. Verilator harnesses run before any
 hardware work, and the DE10-Nano is the final proof. Every claim is closed by
 a measurement.
 
-**One `.rbf` — `Arcade-NMKMacPlus` — one board (BP964A / BP965A), two
+**One `.rbf` — `Arcade-NMKBP964` — one board (BP964A / BP965A), two
 parents.**
 
 | set | MAME description | orientation | main program | notes |
@@ -34,7 +34,7 @@ Both are parents; there are no clones in MAME 0.289.
 
 **Prerequisites.**
 - **ROMs: present.** `macrossp.zip` and `quizmoon.zip` are in
-  `~/Arcade-NMKMacPlus_MiSTer/mame_roms/`, and `mame -verifyroms` (0.289)
+  `~/Arcade-NMKBP964_MiSTer/mame_roms/`, and `mame -verifyroms` (0.289)
   reports both as good. The directory is gitignored and never committed.
 - **The GHDL synthesis toolchain is missing.** TG68K.C (§2.4) is VHDL, and
   Verilator needs a Verilog netlist of it. NMK16's
@@ -795,7 +795,7 @@ The same pipeline as MS1Z:
   game-mode switches, and `carry_over()` of the hiscore and cheat blocks
   (checksummed before and after);
 - `gen_hiscore_mra.py`, `gen_cheats_mra.py`, `gen_autofire_mra.py`;
-- `releases/` holds the `.mra` files and `Arcade-NMKMacPlus_<date>.rbf`;
+- `releases/` holds the `.mra` files and `Arcade-NMKBP964_<date>.rbf`;
 - M6 adds the core to kuzecores.
 
 ### 2.12 No baked ROM data, and licences
@@ -1139,7 +1139,7 @@ screen timing.
 ## Appendix A — OSD string (draft)
 
 ```
-"NMKMacPlus;SS3E000000:80000;",
+"NMKBP964;SS3E000000:80000;",
 "-;",
 "HBO[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 "HBO[3:1],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",

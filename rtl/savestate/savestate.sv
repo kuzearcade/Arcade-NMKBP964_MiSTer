@@ -28,7 +28,7 @@ module savestate #(
 	parameter [28:0] SLOT_STRIDE  = 29'h00008000,   // 0x40000 bytes >> 3
 	parameter        TIMEOUT_BITS = 22,
 	parameter        RD_LAT       = 3,               // clocks from ss_addr to a valid ss_rdata
-	// VARLAT=1 (NMKMacPlus, 2026-09-24): every word is a handshake instead of a
+	// VARLAT=1 (NMKBP964, 2026-09-24): every word is a handshake instead of a
 	// fixed latency. A read pulses ss_rd with ss_addr stable and takes ss_rdata
 	// on the clock ss_ack is high; a write pulses ss_wr and waits for ss_ack.
 	// The core can then route words through its CPU bus, whose latency varies.

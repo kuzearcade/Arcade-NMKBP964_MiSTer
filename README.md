@@ -1,4 +1,4 @@
-# Arcade-NMKMacPlus_MiSTer
+# Arcade-NMKBP964_MiSTer
 
 A MiSTer FPGA core for the Banpresto BP964A / BP965A board:
 
@@ -7,7 +7,10 @@ A MiSTer FPGA core for the Banpresto BP964A / BP965A board:
 | `macrossp` | Macross Plus (MOSS / Banpresto, 1996) | vertical |
 | `quizmoon` | Quiz Bishoujo Senshi Sailor Moon - Chiryoku Tairyoku Toki no Un (Banpresto, 1997) | horizontal |
 
-**In development; not yet run on a DE10-Nano.**
+Runs on the DE10-Nano: both games, savestates and every OSD feature were
+checked on the board (`docs/hw-bringup.md`). The bitstream is
+`releases/Arcade-NMKBP964_20260924.rbf`, and the core is in the
+[kuzecores](https://github.com/kuzearcade/kuzecores) downloader database.
 
 The board has:
 - a 68EC020 at 25 MHz (TG68K.C here);
@@ -24,10 +27,11 @@ reference, and every claim below is a measurement against it
   including sprites, zoom, alpha and zoomed layers.
 - **Whole board from reset:** boots, runs the attract, and matches MAME frame
   for frame at a constant offset. It plays sound through the ES5506. The
-  68EC020's speed is being tuned to MAME's work per frame (D3, MP-6).
+  68EC020 runs at 33/48 of 48 MHz, set against MAME on injected game states (MP-13).
 - **Memory:** the 62 MB ROM image loads into DDR3 (`address=` in the `.mra`),
-  and the program, sprite and text ROMs are copied into SDRAM at boot. It
-  runs on the standard 32 MB SDRAM.
+  and the program and text ROMs (6 MB) are copied into SDRAM at boot;
+  graphics rows and samples are read from DDR3. It runs on the standard 32 MB
+  SDRAM.
 
 See `docs/PLAN.md` for the plan and its gates, `docs/known-issues.md` for
 every finding (MP-n), and `docs/provenance.md` for where every file came from.

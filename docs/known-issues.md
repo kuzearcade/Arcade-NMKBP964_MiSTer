@@ -1,4 +1,4 @@
-# Known issues and findings — Arcade-NMKMacPlus_MiSTer
+# Known issues and findings — Arcade-NMKBP964_MiSTer
 
 Every entry is closed by a measurement, or says what would close it. Numbering
 is `MP-n`. The oracle is MAME 0.289 (`~/mame`, patched per

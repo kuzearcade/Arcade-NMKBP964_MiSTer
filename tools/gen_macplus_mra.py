@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Arcade-NMKMacPlus_MiSTer .mra files from tools/macplus_romdata.py.
+"""Generate the Arcade-NMKBP964_MiSTer .mra files from tools/macplus_romdata.py.
 
     tools/gen_macplus_mra.py            write releases/*.mra
     tools/gen_macplus_mra.py --check    build each set's DDR3 image from the zips
@@ -126,7 +126,7 @@ def mra(setname):
   <year>{s['year']}</year>
   <manufacturer>{x(s['manufacturer'])}</manufacturer>
   <category>Arcade</category>
-  <rbf>NMKMacPlus</rbf>
+  <rbf>NMKBP964</rbf>
   <rotation>{s['rotation']}</rotation>
 
 {switches_xml(setname, flags)}

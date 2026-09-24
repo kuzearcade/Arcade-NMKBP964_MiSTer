@@ -1,4 +1,4 @@
-# Arcade-NMKMacPlus_MiSTer source list. Edit HERE, not in the .qsf: Quartus
+# Arcade-NMKBP964_MiSTer source list. Edit HERE, not in the .qsf: Quartus
 # appends a copy of what this file sources to the end of the .qsf on every
 # quartus_map run; revert that before committing (MS1Z lesson).
 set_global_assignment -name SYSTEMVERILOG_FILE MacPlus.sv
@@ -34,4 +34,4 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/savestate.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/savestate_ui.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/ss_m68k_park.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/ss_tg68_park.sv
-set_global_assignment -name SDC_FILE NMKMacPlus.sdc
+set_global_assignment -name SDC_FILE NMKBP964.sdc

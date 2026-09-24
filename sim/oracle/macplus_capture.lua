@@ -1,4 +1,4 @@
--- Oracle capture for Arcade-NMKMacPlus_MiSTer (MAME 0.289, macrossp / quizmoon).
+-- Oracle capture for Arcade-NMKBP964_MiSTer (MAME 0.289, macrossp / quizmoon).
 --
 -- Every frame from MP_FROM to MP_FROM+MP_FRAMES-1, at frame_done, writes
 --   <MP_OUT>/sNNNNN.bin  video state, fixed layout (all little-endian u32 words

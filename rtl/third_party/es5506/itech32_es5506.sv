@@ -52,7 +52,7 @@ module itech32_es5506 #(
 	output logic [4:0]         active_voices,
 	output logic [4:0]         scan_voice,
 	output logic               engine_busy,
-	// Savestate port (Arcade-NMKMacPlus_MiSTer, 2026-09-24; not in ITech32).
+	// Savestate port (Arcade-NMKBP964_MiSTer, 2026-09-24; not in ITech32).
 	// Valid only while ce_16m is held low and engine_busy is low: ss_en takes
 	// the engine/host row read port (row on ss_row_q one clock after
 	// ss_voice), ss_row_we writes a whole row to both replicas, ss_glob_we

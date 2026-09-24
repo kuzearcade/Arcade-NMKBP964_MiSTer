@@ -1,4 +1,4 @@
-"""The one ROM table of Arcade-NMKMacPlus_MiSTer (docs/PLAN.md Appendix D).
+"""The one ROM table of Arcade-NMKBP964_MiSTer (docs/PLAN.md Appendix D).
 
 The DDR3 image is 62 MB at 0x30000000, the same layout for both games:
 

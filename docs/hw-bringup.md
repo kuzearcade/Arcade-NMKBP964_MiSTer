@@ -1,11 +1,11 @@
-# Hardware bring-up — Arcade-NMKMacPlus_MiSTer
+# Hardware bring-up — Arcade-NMKBP964_MiSTer
 
 DE10-Nano at 192.168.1.138. Every file deployed is checked by md5 against the
 local copy; the core is loaded through `/dev/MiSTer_cmd`.
 
 ## 2026-09-24 — first bitstreams
 
-Deployed as `/media/fat/_Arcade/cores/Arcade-NMKMacPlus_20260924.rbf`, with
+Deployed as `/media/fat/_Arcade/cores/Arcade-NMKBP964_20260924.rbf`, with
 both `.mra` files in `_Arcade/`. The ROM zips went to `games/mame/`; the board
 had neither.
 

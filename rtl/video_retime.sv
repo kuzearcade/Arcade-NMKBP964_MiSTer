@@ -42,7 +42,7 @@ module video_retime #(
 	// 262 (rtl/kaneko/video_timing_sandscrp.sv). The visible window stays
 	// rows 16..239 on both, which is what tall240 alters, not this.
 	parameter integer VTOTAL_P = 278,
-	// Arcade-NMKMacPlus_MiSTer: the vertical window and the vsync offset were
+	// Arcade-NMKBP964_MiSTer: the vertical window and the vsync offset were
 	// fixed at the NMK16 geometry (rows 16..239, tall240 rows 8..247, vsync 24
 	// lines into the blank). They are parameters here; the defaults keep that
 	// geometry. MacPlus passes rows 0..239 (the second set, selected by the

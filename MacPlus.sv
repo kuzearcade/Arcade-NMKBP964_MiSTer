@@ -1,4 +1,4 @@
-// Arcade-NMKMacPlus_MiSTer -- MiSTer top level for the Banpresto BP964A /
+// Arcade-NMKBP964_MiSTer -- MiSTer top level for the Banpresto BP964A /
 // BP965A board: Macross Plus (1996) and Quiz Bishoujo Senshi Sailor Moon (1997).
 //
 // Derived from Arcade-JalecoMS1Z_MiSTer's MS1Z.sv (docs/provenance.md): the
@@ -47,7 +47,7 @@ localparam CONF_STR = {
 	// Savestates: 4 slots of 0x80000 bytes at 0x3E000000, above the 62 MB ROM
 	// image at 0x30000000. The image is 0x24900 16-bit words = 0x49200 bytes
 	// (docs/PLAN.md Appendix C), so the slot is the next power of two up.
-	"NMKMacPlus;SS3E000000:80000;",
+	"NMKBP964;SS3E000000:80000;",
 	"-;",
 	"HBO[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"HBO[3:1],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",

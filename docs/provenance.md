@@ -1,4 +1,4 @@
-# Provenance — Arcade-NMKMacPlus_MiSTer
+# Provenance — Arcade-NMKBP964_MiSTer
 
 Where every file came from. Pins are in `deps.lock`.
 

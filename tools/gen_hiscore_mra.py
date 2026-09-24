@@ -80,7 +80,7 @@ HS_CHECK_OVERRIDE = {
 # -- where f000 is an OFFSET into m_ram, not a CPU address. Read as a CPU
 # address it lands in ROM and no score is ever saved or restored. The share
 # bases below are this board's (megasys_base_map: work RAM at 0x0F0000).
-SHARE_BASE = {}   # Arcade-NMKMacPlus_MiSTer: macrossp's record is a plain program address (F16DDC)
+SHARE_BASE = {}   # Arcade-NMKBP964_MiSTer: macrossp's record is a plain program address (F16DDC)
 
 def records(lines,setname=None):
     recs=[]; total=0

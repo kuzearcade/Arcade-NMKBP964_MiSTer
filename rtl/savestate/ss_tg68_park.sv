@@ -1,4 +1,4 @@
-// Savestate support (NMKMacPlus, 2026-09-24): park the TG68K (68EC020 mode)
+// Savestate support (NMKBP964, 2026-09-24): park the TG68K (68EC020 mode)
 // at an instruction boundary and get every register out. The 68020 sibling of
 // ss_m68k_park.sv; the monitor, the state registers and the protocol are the
 // same, only the bus differs.
