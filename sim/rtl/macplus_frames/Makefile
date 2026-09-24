@@ -16,3 +16,12 @@ obj_dir/Vmacplus_core: tb.cpp $(SRCS)
 		$(RTL)/macplus/macplus_core.sv tb.cpp -o Vmacplus_core
 clean:
 	rm -rf obj_dir
+# The build above passes -Wno-fatal and -Wno-IMPLICIT, which let an undriven
+# output (rom_req) and a state constant used before its declaration through
+# silently (2026-09-24). `make lint` fails on those classes in this core's RTL.
+lint:
+	verilator --lint-only -Wall -Wno-fatal -Wno-BLKANDNBLK --top-module macplus_core \
+		-y $(RTL)/macplus -y $(RTL)/third_party/es5506 -y $(RTL)/third_party/fx68k \
+		$(RTL)/third_party_gen/tg68k/TG68KdotC_Kernel.v $(RTL)/third_party/fx68k/fx68k.sv $(RTL)/third_party/fx68k/fx68kAlu.sv $(RTL)/third_party/fx68k/uaddrPla.sv \
+		$(RTL)/macplus/macplus_core.sv 2>&1 | grep -A1 -E '^%(Error|Warning-(UNDRIVEN|IMPLICIT|USEDBEFOREDECL))' | grep -B1 'rtl/macplus/' ; test $$? -ne 0
+.PHONY: lint clean

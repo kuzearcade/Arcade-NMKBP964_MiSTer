@@ -136,7 +136,7 @@ module macplus_cpu_bus (
 
 	// ================================================================ cycle FSM
 	localparam S_IDLE = 3'd0, S_CAP = 3'd1, S_RAMQ = 3'd2, S_CHK = 3'd3, S_FILL = 3'd4,
-	           S_BOARD = 3'd5, S_RESP = 3'd6;
+	           S_BOARD = 3'd5, S_RESP = 3'd6, S_FILL2 = 3'd7;
 	reg  [2:0]  st;
 	reg  [1:0]  fk;             // fill word
 	reg  [127:0] fline;
@@ -239,5 +239,4 @@ module macplus_cpu_bus (
 			endcase
 		end
 	end
-	localparam S_FILL2 = 3'd7;
 endmodule

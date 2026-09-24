@@ -136,6 +136,7 @@ module macplus_main #(
 	wire s_vid = b_addr >= 24'h800000 && b_addr < 24'hA04000;
 	wire s_io  = b_addr[23:8] == 16'hB000;
 	wire s_snd = b_addr[23:2] == 22'h300000;          // C00000-C00003
+	always @(*) rom_req = c_rom_req;
 	assign rom_addr = c_rom_addr;
 	assign vid_sel  = b_req && s_vid && !b_ack;
 	assign vid_addr = b_addr[23:2];
