@@ -26,6 +26,7 @@ Where every file came from. Pins are in `deps.lock`.
 | `tools/macplus_model.py` | new | the Python reference renderer (MP-1) |
 | `tools/model_sweep.py`, `q1_opcode_coverage.py`, `q3_q8_measure.py`, `mk_macplus_images.py`, `run_oracle_capture.sh`, `gen_tg68k_verilog.sh` | new | |
 | `tools/mister_keys.py`, `frame_compare.py`, `gen_t80_verilog.sh` | Arcade-JalecoMS1Z_MiSTer | verbatim |
+| `tools/gen_autofire_mra.py` | Arcade-JalecoMS1Z_MiSTer | modified: includes Macross Plus; this core's byte-2 note |
 | `tools/mame-patches/macrossp-oracle.patch` | new | `MP_ORACLE=1` removes MAME's speedup and sound-command stall |
 | `sim/oracle/macplus_capture.lua`, `macplus_play.lua`, `macplus_idle.lua` | new | |
 | `sim/rtl/video_state/` | new | M1 |
