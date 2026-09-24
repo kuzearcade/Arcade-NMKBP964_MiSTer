@@ -1,0 +1,36 @@
+diff --git a/src/mame/nmk/macrossp.cpp b/src/mame/nmk/macrossp.cpp
+index 9047feaa7cf..ab90f9bac70 100644
+--- a/src/mame/nmk/macrossp.cpp
++++ b/src/mame/nmk/macrossp.cpp
+@@ -297,6 +297,7 @@ Notes:
+ #include "tilemap.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ 
+ namespace {
+ 
+@@ -779,7 +780,10 @@ void macrossp_state::soundcmd_w(offs_t offset, uint32_t data, uint32_t mem_mask)
+ 		m_sndpending = true;
+ 		m_audiocpu->set_input_line(2, HOLD_LINE);
+ 		// spin for a while to let the sound CPU read the command
+-		m_maincpu->spin_until_time(attotime::from_usec(50));
++		// Arcade-NMKMacPlus_MiSTer oracle patch: MP_ORACLE=1 removes this stall,
++		// which the board does not have (docs/PLAN.md fact 9).
++		if (!getenv("MP_ORACLE"))
++			m_maincpu->spin_until_time(attotime::from_usec(50));
+ 	}
+ }
+ 
+@@ -1153,7 +1157,10 @@ void macrossp_state::quizmoon_speedup_w(offs_t offset, uint32_t data, uint32_t m
+ 
+ void macrossp_state::init_macrossp()
+ {
+-	m_maincpu->space(AS_PROGRAM).install_write_handler(0xf10158, 0xf1015b, write32s_delegate(*this, FUNC(macrossp_state::macrossp_speedup_w)));
++	// Arcade-NMKMacPlus_MiSTer oracle patch: MP_ORACLE=1 leaves the idle loop
++	// running, so its counter at 0xf1015a measures spare CPU per frame.
++	if (!getenv("MP_ORACLE"))
++		m_maincpu->space(AS_PROGRAM).install_write_handler(0xf10158, 0xf1015b, write32s_delegate(*this, FUNC(macrossp_state::macrossp_speedup_w)));
+ }
+ 
+ void macrossp_state::init_quizmoon()

@@ -1,0 +1,56 @@
+# Copyrighted arcade ROMs and anything derived from them. Never committed.
+/mame_roms/
+**/roms/
+*.rom
+sim/oracle/traces/
+
+# Quartus build output and scratch state (nothing tracked begins with output_files).
+output_files*/
+db/
+incremental_db/
+greybox_tmp/
+/build_id.v
+/jtag.cdf
+/cfg/
+/snap/
+*.qws
+*.qdb
+*.rpt
+*.summary
+*.smsg
+*.sld
+*.pin
+*.done
+*.jdi
+*.qarlog
+*_bak
+c5_pin_model_dump.txt
+PLLJ_PLLSPE_INFO.txt
+# fx68k's microcode, copied to the root at build time (the real files are in rtl/third_party/fx68k/).
+/microrom.mem
+/nanorom.mem
+
+# Simulation products: every Verilator build directory and executable, frame and
+# audio dumps, logs. Named by pattern from the first commit, because MS1Z's
+# Vms1z_aud binary reached a commit before its rule did.
+sim/**/obj_dir*/
+sim/**/obj_*/
+sim/rtl/*/V*
+!sim/rtl/*/*.sv
+!sim/rtl/*/*.v
+sim/**/*.ppm
+sim/**/*.raw
+sim/**/*.wav
+sim/**/*.log
+sim/**/*.vcd
+sim/**/*.fst
+sim/rtl/*/*.mem
+sim/rtl/*/*.bin
+*.xdump
+
+# Derived .mra tree with the Autofire menu unlocked (tools/gen_autofire_mra.py).
+/autofire_releases/
+
+__pycache__/
+.DS_Store
+*.swp
