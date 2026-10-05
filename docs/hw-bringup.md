@@ -42,6 +42,7 @@ OSD settings go in as `config/<set>.CFG`, the 16-byte status word.
 | DIP switches | OSD Coin A = Free Play resets the core and the attract shows FREE PLAY in place of CREDIT 0. The `.dip` was deleted afterwards (it would mask the autofire byte). |
 | CRT Adjust | On at 0: capture identical to Off. V-Shift +10 moves the picture 11.6 capture pixels down. H-Position +20 only narrows the window 3 px a side: the HDMI scaler re-centres on the active area, so horizontal position needs a CRT to see (as for the siblings). |
 | Audio, macrossp | 42 s of HDMI audio from load against MAME's 26 s WAV (`-wavwrite`, `MP_ORACLE=1`): best alignment 10.83 s (the load and copy), loudness-envelope correlation **0.998**, level **-0.39 dB**, peaks 1,207 / 1,210, band energy shares within 0.005. The ES5506 gain (`* 205 >> 11`) is right. |
+| Audio, macrossp in play (2026-10-05) | Coin, coin, start at MAME's frame 1800, 60 s of play against MAME's WAV: **-0.34 dB**, band shares within 0.03 (the board slightly brighter above 1 kHz); every voice on ES5506 channel 0 in MAME, attract and play, so the core's channel-0 output drops nothing. Audio Boost +6 / +12 dB: **+6.02 / +12.04 dB** against Off, peak 13,726 at +12 dB, no clipped samples, band shares unchanged. (MP-15) |
 | Audio, quizmoon | 40 s against MAME's WAV: correlation **0.985**, **-0.24 dB**, peaks 906 / 918 (the 16-bit sample banks). |
 | quizmoon | Runs, 384x224; savestates and audio as above. |
 

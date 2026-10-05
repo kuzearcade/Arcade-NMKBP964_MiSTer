@@ -547,3 +547,31 @@ SDRAM still serves (program, sound program, text).
 MP-8's BG path still crosses one row at a time. It is in time on every M3
 frame so far, and the same ring would lift it if a zoomed scene ever
 overruns.
+
+## MP-15 — "Macross Plus BGM low": the core is MAME's level; an Audio Boost (closed, measured)
+
+Reported as issue #1: the music sounds muffled and quieter than it should,
+the effects fine.
+
+**Measured, not a fidelity fault.**
+- `macplus_sound` outputs the ES5506's channel 0 only, where MAME's single
+  configured channel folds all six (`voice_channel % m_channels`). A MAME Lua
+  count of every playing voice's CA bits, each frame, 30 s of attract and
+  60 s of play: all on channel 0. Nothing is dropped.
+- The board's HDMI audio against MAME's WAV over the same coin/start
+  timeline: attract -0.38 dB, play -0.34 dB; peaks 1,211 / 1,226 and
+  2,902 / 3,432; the band shares agree (the board slightly brighter above
+  1 kHz). Both have over 80 % of the energy below 500 Hz and nearly nothing
+  above 8 kHz: the samples and the ES5506 filters as MAME runs them.
+- The game is mixed quietly in MAME: about -37 dBFS RMS in play, peaks near
+  -19 dBFS.
+
+**Added: OSD Audio Boost** (`O[19:18]`: Off, +6dB, +12dB). `macplus_sound`'s
+gain stage shortens its shift (`* 205 >> 10`, `>> 9`) before the 16-bit
+saturation, so the boost works on the ES5506's 20-bit output. Off is MAME's
+level, unchanged. On the board: +6.02 and +12.04 dB against Off, peak
+13,726 at +12 dB in play, no clipped samples, band shares unchanged.
+
+The bitstream moved to seed 6: at seed 12 the rebuild missed setup by
+0.064 ns inside TG68K's register file (not the audio path); seeds 2, 6, 9,
+15 gave -0.151, +0.244, +0.184, +0.167 ns.

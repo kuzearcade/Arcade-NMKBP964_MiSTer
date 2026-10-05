@@ -9,7 +9,7 @@ A MiSTer FPGA core for the Banpresto BP964A / BP965A board:
 
 Runs on the DE10-Nano: both games, savestates and every OSD feature were
 checked on the board (`docs/hw-bringup.md`). The bitstream is
-`releases/Arcade-NMKBP964_20260924.rbf`, and the core is in the
+`releases/Arcade-NMKBP964_20261005.rbf`, and the core is in the
 [kuzecores](https://github.com/kuzearcade/kuzecores) downloader database.
 
 The board has:
@@ -42,7 +42,8 @@ DIP switches in the OSD, pause, high scores (macrossp), cheats (seven slots,
 named in each `.mra`), autofire (macrossp, unlocked by the `.mra`),
 orientation (both quarter turns), flip, CRT Adjust, scandoubler/HQ2x, MAME's
 keyboard layout, savestates (four slots; Alt+F1/F5/F3/F4 save, F1/F5/F3/F4
-load; `docs/known-issues.md` MP-12).
+load; `docs/known-issues.md` MP-12), and an Audio Boost of +6 or +12 dB
+(Off is MAME's level, which is quiet; MP-15).
 
 ## Credits
 

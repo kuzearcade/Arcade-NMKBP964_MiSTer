@@ -69,6 +69,7 @@ module macplus_core #(
 	output     [23:0] rgb,
 	output     [23:0] rgb_fade,
 	// audio
+	input      [1:0]  snd_boost,     // macplus_sound's boost
 	output signed [15:0] snd_l,
 	output signed [15:0] snd_r,
 	// debug
@@ -170,7 +171,7 @@ module macplus_core #(
 		.rom_req(srom_req), .rom_addr(srom_addr), .rom_ack(srom_ack), .rom_data(srom_data),
 		.cmd_we(snd_cmd_we), .cmd(snd_cmd), .pending(snd_pending),
 		.smp_req(smp_req), .smp_bank(smp_bank), .smp_word(smp_word), .smp_ack(smp_ack), .smp_data(smp_data),
-		.snd_l(snd_l), .snd_r(snd_r),
+		.boost(snd_boost), .snd_l(snd_l), .snd_r(snd_r),
 		.dbg_es_writes(dbg_es_writes), .dbg_es_irq(dbg_es_irq), .dbg_latch_reads(dbg_latch_reads),
 		.ss_park_req(ss_freeze), .ss_resume(ss_resume), .ss_active(ss_active), .ss_addr(ss_addr), .ss_rd(ss_rd), .ss_wr(ss_wr),
 		.ss_wdata(ss_wdata), .ss_rdata(s_rdata), .ss_ack(s_ack), .ss_owns(s_owns), .ss_parked(s_parked), .es_quiet(es_quiet));

@@ -17,7 +17,9 @@
 // the sample out as sample / 2^19 (es5506.cpp put_int_clamp(..., 1 << 19)),
 // routes it at 1.6, and a 16-bit WAV is that times 32768: sample * 0.1. Here
 // (sample * 205) >> 11 = sample * 0.10010, saturated to 16 bits (the level is
-// then confirmed against MAME's WAV, MS1Z-13).
+// then confirmed against MAME's WAV, MS1Z-13). `boost` (the OSD's Audio Boost)
+// shortens the shift: 1 is +6 dB (>> 10), 2 is +12 dB (>> 9); the game is
+// mixed quietly (about -37 dBFS in play, as in MAME), issue #1.
 //
 // Savestates (docs/PLAN.md 2.9, Appendix C): ss_m68k_park parks the 68000;
 // once it is parked the ES5506's 16 MHz enable stops, and when the engine has
@@ -49,6 +51,7 @@ module macplus_sound (
 	input             smp_ack,
 	input      [15:0] smp_data,
 	// audio
+	input      [1:0]  boost,         // 0 MAME's level, 1 +6 dB, 2 +12 dB
 	output reg signed [15:0] snd_l,
 	output reg signed [15:0] snd_r,
 	// debug
@@ -271,10 +274,10 @@ module macplus_sound (
 		.ss_glob_q(es_glob_q), .ss_glob_we(es_glob_we), .ss_glob_d(es_stage[463:4]));
 	assign smp_word = smp_addr_b[21:1];
 
-	function signed [15:0] gain(input signed [19:0] v);
+	function signed [15:0] gain(input signed [19:0] v, input [1:0] b);
 		reg signed [31:0] p;
 		begin
-			p = ($signed(v) * 32'sd205) >>> 11;
+			p = ($signed(v) * 32'sd205) >>> (b == 2'd2 ? 9 : b == 2'd1 ? 10 : 11);
 			gain = (p > 32'sd32767) ? 16'sh7FFF : (p < -32'sd32768) ? 16'sh8000 : p[15:0];
 		end
 	endfunction
@@ -286,6 +289,6 @@ module macplus_sound (
 			if (es_req && es_ack && !eRWn) dbg_es_writes <= dbg_es_writes + 32'd1;
 			if (es_irq && !es_irq_d) dbg_es_irq <= dbg_es_irq + 32'd1;
 		end
-		if (es_strobe) begin snd_l <= gain(es_l); snd_r <= gain(es_r); end
+		if (es_strobe) begin snd_l <= gain(es_l, boost); snd_r <= gain(es_r, boost); end
 	end
 endmodule

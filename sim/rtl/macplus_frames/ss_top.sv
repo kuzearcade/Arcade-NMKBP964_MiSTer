@@ -50,6 +50,7 @@ module ss_top #(
 	output            vsync,
 	output     [23:0] rgb,
 	output     [23:0] rgb_fade,
+	input      [1:0]  snd_boost,
 	output signed [15:0] snd_l,
 	output signed [15:0] snd_r,
 	output     [31:0] dbg_irq3,

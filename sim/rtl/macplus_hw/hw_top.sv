@@ -104,7 +104,7 @@ module hw_top #(
 		.spr_req(spr_req), .spr_addr(spr_addr), .spr_ready(spr_ready), .spr_valid(spr_valid), .spr_data(spr_data),
 		.smp_req(smp_req), .smp_bank(smp_bank), .smp_word(smp_word), .smp_ack(smp_ack), .smp_data(smp_data),
 		.ce_pix(ce_pix), .hcount(hcount), .vcount(vcount), .hblank(hb), .vblank(vb), .hsync(hs), .vsync(vs),
-		.rgb(rgb), .rgb_fade(rgbf), .snd_l(snd_l), .snd_r(snd_r),
+		.rgb(rgb), .rgb_fade(rgbf), .snd_boost(2'd0), .snd_l(snd_l), .snd_r(snd_r),
 		.dbg_irq3(dbg_irq3), .dbg_iack3(), .dbg_idle(dbg_idle), .dbg_es_writes(dbg_es_writes), .dbg_es_irq(),
 		.dbg_latch_reads(), .dbg_latch_writes(dbg_latch_writes), .dbg_cpu_addr(dbg_cpu_addr),
 		.dbg_spr_max_cycles(), .dbg_spr_overruns(dbg_spr_overruns), .dbg_bg_overruns(dbg_bg_overruns));
