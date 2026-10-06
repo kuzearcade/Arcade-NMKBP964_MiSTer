@@ -8,7 +8,8 @@ Where every file came from. Pins are in `deps.lock`.
 |---|---|---|
 | `sys/` | Template_MiSTer `3ea1134c` (via Arcade-JalecoMS1Z_MiSTer) | verbatim |
 | `rtl/sdram.sv`, `sdram_arb.sv`, `sdram_req.sv`, `rom_cache_n.sv`, `rom_cache1.sv` | Arcade-JalecoMS1Z_MiSTer | verbatim (the siblings' modified `sdram.sv`) |
-| `rtl/video_retime.sv`, `rtl/crt_chain.sv`, `rtl/cheats.sv` | Arcade-JalecoMS1Z_MiSTer | verbatim |
+| `rtl/crt_chain.sv`, `rtl/cheats.sv` | Arcade-JalecoMS1Z_MiSTer | verbatim |
+| `rtl/video_retime.sv` | Arcade-JalecoMS1Z_MiSTer | changed here (MP-17, marked MODIFIED, as MS1Z-16): the read side runs from configuration, black while the raster is stopped |
 | `rtl/savestate/savestate_ui.sv`, `ss_m68k_park.sv` | Arcade-JalecoMS1Z_MiSTer | verbatim |
 | `rtl/savestate/savestate.sv` | Arcade-JalecoMS1Z_MiSTer | modified: `VARLAT=1` adds a handshake mode (`ss_rd` / `ss_ack`), off by default |
 | `rtl/savestate/ss_tg68_park.sv` | new, from `ss_m68k_park.sv` | the same monitor for TG68K, on `macplus_cpu_bus`'s captured cycles |
