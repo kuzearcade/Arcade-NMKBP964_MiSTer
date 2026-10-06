@@ -729,7 +729,7 @@ docs/            PLAN, known-issues (MP-n), provenance, hw-bringup, README
 | `rtl/rom_cache_n.sv`, `rom_cache1.sv` | MS1Z | verbatim; a 32-bit-aware wrapper for the TG68K side if needed |
 | `rtl/video_retime.sv`, `crt_chain.sv`, `third_party/crt_adjust` | MS1Z | verbatim |
 | `rtl/cheats.sv` | MS1Z (ACTS=3, masked kind) | extended for conditions if Q16 needs them |
-| `rtl/third_party/hiscore` | MS1Z (validating, M10K-inferring copy) | verbatim |
+| `rtl/third_party/hiscore` | MS1Z (validating, M10K-inferring copy; the validation removed in MP-16) | verbatim |
 | `rtl/savestate/savestate.sv`, `savestate_ui.sv` | MS1Z | verbatim |
 | `rtl/savestate/ss_m68k_park.sv` | MS1Z | verbatim, sound 68000 |
 | `rtl/savestate/ss_m68020_park.sv` | new, from `ss_m68k_park.sv` | 68020 frames, VBR, ISP/MSP/USP, CACR (§2.9) |

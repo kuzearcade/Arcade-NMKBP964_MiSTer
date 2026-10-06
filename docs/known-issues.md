@@ -575,3 +575,24 @@ level, unchanged. On the board: +6.02 and +12.04 dB against Off, peak
 The bitstream moved to seed 6: at seed 12 the rebuild missed setup by
 0.064 ns inside TG68K's register file (not the audio path); seeds 2, 6, 9,
 15 gave -0.151, +0.244, +0.184, +0.167 ns.
+
+## MP-16 — High scores lost after a new record: the dump validation removed (closed, measured)
+
+The vendored `hiscore.v` (MS1Z's copy) carried NMK16's dump validation
+(NMK-33 there): before a restore, the record's first and last byte in the
+`.nvm` were compared with `hiscore.dat`'s start/end values, and the dump was
+discarded on a mismatch. Macross Plus's end byte (main RAM 0xf16e39) is the
+third initial of the 8th-place name; a new entry in ranks 1-6 moves the 6th
+name down to it, and the next load threw the saved table away. NMK16 removed
+it (NMK-37); so does this, from the same file (MS1Z's current copy, byte for
+byte but the note's issue numbers). Only the RAM's start and end bytes are
+checked before the restore, as upstream.
+
+On the board (`Arcade-NMKBP964_20261006.rbf`, High Scores On), with a
+coin, a start and 15 s of play the OSD's save is MAME's RAM at the same
+point, byte for byte; a byte inside the record, and separately its last
+byte, changed in the `.nvm` and the core reloaded: a savestate holds the
+changed record and not the saved one (the 68EC020's RAM searched in its
+32-bit order), and the next save keeps it. On the release (20261005) the
+last-byte change was reverted. Timing met at seed 6 (setup +0.498 ns, hold
++0.251 ns).
