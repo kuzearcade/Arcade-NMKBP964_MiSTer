@@ -674,3 +674,34 @@ the card lost the picture after the reset; with this change the signal runs
 through it (Macross Plus). HDMI is as before.
 
 Timing met at seed 6 (setup +0.426 ns, hold +0.244 ns).
+
+## MP-19 — Sailor Moon's vsync moved at the end of a load (closed, measured)
+
+After MP-18 the sync ran through a load and a reset on Macross Plus, but on
+Quiz Bishoujo Senshi Sailor Moon the direct-video capture still lost the
+picture for about two seconds as the load finished (it showed the game on
+HDMI by then; an OSD Reset kept the sync). quizmoon's shorter window
+(rows 0..223, `tall240`) is selected by the game-mode bit of the .mra's
+`<switches>`, and Main_MiSTer sends those after the ROM: the loading screen
+ran with Macross Plus's rows 0..239, and `video_retime` placed the vsync
+from the window's end, so it moved 16 lines when the switches arrived.
+
+- The vsync now counts from the first layout's window end (`VE_A`, row 240)
+  on both sets: 4 lines into Macross Plus's 16-line blank, as before, and
+  20 lines into quizmoon's 32-line one. Both games run on the same board
+  raster; only the visible window differs, and that stays in the blanking
+  and data-enable outputs (HDMI still sees 384x224 on quizmoon).
+
+A Verilator test (the NMKBP964 geometry, the core held in reset through a
+six-frame download, `tall240` set at its end, the reset ended on `rel_tog`):
+with the old placement one vsync interval was 16 lines short; now neither
+the hsync nor the vsync interval ever changes, and the window becomes 224
+rows.
+
+On the board, direct video on, loading Sailor Moon from the menu (the
+capture started 2 s after the load command): the release (v2026-10-07)
+lost the signal for about 2.5 s at the end of the load; with this change
+the signal runs through it (3 of 3 loads). Macross Plus loads and both
+games' OSD Reset keep the sync; HDMI is as before.
+
+Timing met at seed 6 (setup +0.179 ns, hold +0.246 ns).

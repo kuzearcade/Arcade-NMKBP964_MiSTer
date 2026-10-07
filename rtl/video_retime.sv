@@ -47,7 +47,8 @@ module video_retime #(
 	// lines into the blank). They are parameters here; the defaults keep that
 	// geometry. MacPlus passes rows 0..239 (the second set, selected by the
 	// same tall240 input, 0..223 for quizmoon) and a vsync 4 lines into a
-	// 16-line blank.
+	// 16-line blank. The vsync counts from VE_A on both sets (MP-19), so on
+	// quizmoon it is 20 lines into its 32-line blank.
 	parameter [9:0] VS_A = 10'd16, VE_A = 10'd240,
 	parameter [9:0] VS_B = 10'd8,  VE_B = 10'd248,
 	parameter [9:0] VS_REL = 10'd24
@@ -143,7 +144,6 @@ module video_retime #(
 	always @(posedge clk_r) tall_sync <= {tall_sync[0], tall240};
 	wire [9:0] v_start_r = tall_sync[1] ? VS_B : VS_A;
 	wire [9:0] v_end_r   = tall_sync[1] ? VE_B : VE_A;
-	wire [9:0] v_blank_r = VTOTAL - v_end_r;
 	wire [9:0] r_x0 = m7 ? R_X0_7 : R_X0_8;
 	wire [9:0] r_ht = m7 ? R_HT_7 : R_HT_8;
 	wire [9:0] r_aw = m7 ? AW_7   : AW_8;
@@ -211,7 +211,14 @@ module video_retime #(
 	always @(posedge clk_r) if (rst_sync[1]) rst_seen <= 1'b1; else if (frame_edge) rst_seen <= 1'b0;
 	wire       blank_r = stale[1] | rst_sync[1] | rst_seen;
 
-	wire [9:0] vrel = (vcount_r >= v_end_r) ? (vcount_r - v_end_r) : (vcount_r + v_blank_r);
+	// MODIFIED (Arcade-NMKBP964_MiSTer, MP-19): vsync counts from the first
+	// layout's window end (VE_A) whatever tall240 says. tall240 (quizmoon) is
+	// known only from the .mra's <switches>, which come after the ROM: a vsync
+	// that followed v_end_r moved 16 lines when they arrived, at the end of
+	// the load, and a CRT re-locked. The board's raster is the same for both
+	// games; only the visible window differs, and that stays in vb_r / de_r.
+	localparam [9:0] V_BLANK_A = VTOTAL - VE_A;
+	wire [9:0] vrel = (vcount_r >= VE_A) ? (vcount_r - VE_A) : (vcount_r + V_BLANK_A);
 	wire       hs_now = (hcount_r >= hs_start) && (hcount_r < hs_start + hs_width);
 	wire       vs_now = (vrel >= vs_rel) && (vrel < vs_rel + 10'd3);
 
