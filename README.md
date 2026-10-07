@@ -9,7 +9,7 @@ A MiSTer FPGA core for the Banpresto BP964A / BP965A board:
 
 Runs on the DE10-Nano: both games, savestates and every OSD feature were
 checked on the board (`docs/hw-bringup.md`). The bitstream is
-`releases/Arcade-NMKBP964_20261006.rbf`, and the core is in the
+`releases/Arcade-NMKBP964_20261007.rbf`, and the core is in the
 [kuzecores](https://github.com/kuzearcade/kuzecores) downloader database.
 
 The board has:

@@ -421,7 +421,20 @@ wire signed [15:0] snd_l, snd_r;
 // through its CPU bus. Its DDR port is rom_hw's lowest-priority client, so
 // the BG rows and samples keep their bandwidth and screen_rotate its writes.
 // ------------------------------------------------------------------
-wire        core_reset = reset | ~rom_ready | ~sdram_ready;
+wire        core_req = reset | ~rom_ready | ~sdram_ready;
+// (MP-18) The reset ends on video_retime's rel_tog, once a frame where its
+// read side expects the core's raster to begin: the raster then restarts in
+// phase with the sync that ran through the reset, so a CRT does not have to
+// re-lock when the game starts (a frame's delay at most).
+wire        vr_rel_tog;
+reg   [2:0] vr_rel_s = 3'b000;
+reg         vr_hold = 1'b1;
+always @(posedge clk_sys) begin
+	vr_rel_s <= {vr_rel_s[1:0], vr_rel_tog};
+	if (core_req) vr_hold <= 1'b1;
+	else if (vr_rel_s[2] ^ vr_rel_s[1]) vr_hold <= 1'b0;
+end
+wire core_reset = core_req | vr_hold;
 
 savestate_ui savestate_ui (
 	.clk(clk_sys), .ps2_key(ps2_key), .allow_ss(~core_reset),
@@ -498,7 +511,7 @@ video_retime #(
 	.mode1(1'b0), .tall240(quiz),
 	.clk_r(clk_ram),
 	.ce_r(rt_ce), .rgb_r(rt_rgb), .hs_r(rt_hs), .vs_r(rt_vs), .de_r(),
-	.hb_r(rt_hb), .vb_r(rt_vb), .vb_hs_r(rt_vb_hs)
+	.hb_r(rt_hb), .vb_r(rt_vb), .vb_hs_r(rt_vb_hs), .rel_tog(vr_rel_tog), .rel_lead(10'd0)
 );
 assign CLK_VIDEO = clk_ram;
 
