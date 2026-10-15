@@ -275,7 +275,7 @@ OSD Flip currently uses `screen_rotate`'s framebuffer flip. NMK-21 moved the
 siblings to a flip inside the core, so that it reaches the analog output and
 does not force the framebuffer; that is still to do here.
 
-## MP-8 — The BG path keeps one DDR3 row in flight (open, measure in M3)
+## MP-8 — The BG path keeps one DDR3 row in flight (fixed by MP-20)
 
 `macplus_rom_hw`'s BG front end sends one tile row at a time across the
 48-to-96 MHz handshake, with two-flop synchronisers each way. At about
@@ -284,6 +284,9 @@ clocks). The zoomed scenes measured in MP-3 need up to ~121 rows a line,
 which is close to the limit. The DDR3 side already pipelines up to 8 reads;
 the front end needs a queue across the crossing to use them. The M3 run
 decides with the BG overrun counters.
+
+The board decided first: stage 2 striped (MP-20), and the BG rows now cross
+through a ring.
 
 ## MP-9 — The BG engine paired a column with its neighbour's tile word after a stall (fixed; M1 now injects stalls)
 
@@ -705,3 +708,85 @@ the signal runs through it (3 of 3 loads). Macross Plus loads and both
 games' OSD Reset keep the sync; HDMI is as before.
 
 Timing met at seed 6 (setup +0.179 ns, hold +0.246 ns).
+
+## MP-20 — Stage 2 striped on the board: the BG rows crossed to DDR3 one at a time (fixed); a save with cheats on crashed the game (fixed)
+
+Reported with two videos: in Macross Plus's stage 2 the background broke up
+into horizontal stripes, worst over the desert, and the river canyon looked
+noisy. It reproduced on the board (release `0096f476...`, HDMI capture, the
+desert from the start of stage 2). Simulation had never shown it.
+
+**Cause: MP-8.** `macplus_rom_hw` took the BG rows (layers 0..2) one at a
+time through a 4-phase handshake to clk_ddr. Each row cost two
+synchroniser crossings each way plus the DDR3 read latency. When a layer's
+line was not finished by the next line start, that start was missed and the
+line buffer half kept the line from two lines before. Those stale lines are
+the stripes.
+
+A new harness, `sim/rtl/video_hw`, closes the gap: MAME's video state goes
+through the real `macplus_rom_hw` and a DDR3 model on clk_ddr (`MP_DLAT`
+read latency, `MP_ROT` screen_rotate writes, `MP_DBUSY`), with an SDRAM
+stub for the text rows. The picture is compared with MAME's.
+New oracle states: `tools/run_oracle_capture.sh macrossp macrossp_stage2
+12600 5400 play` (stage 2 runs from about frame 12600 in the scripted play).
+
+| front end | DDR3 latency (clk_ddr) | desert 12900 | river zoom 16900 | 17500 |
+|---|---|---|---|---|
+| old (one row) | 24 (the M3 default) | match, max 2,476 clk | **43,972 px**, 477 overruns a layer | **36,640 px** |
+| old | 60, rotate writes | **46,454 px**, every other line | 71,147 px | 70,143 px |
+| new (ring, 15 rows) | 24 | match, max 1,056 | match, 1,280 | match, 1,136 |
+| new | 100, rotate writes | match, 1,619 | match, 2,109 | match, 1,754 |
+| new | 200, rotate writes | match | match (2-3 overrun lines) | match |
+
+The old front end at 60 clocks draws exactly the board's striped dirt.
+
+**Fix.** The BG rows now cross to DDR3 through a ring, as the sprite rows
+have since MP-14:
+- each accepted row's image offset goes into a 16-entry ring behind a
+  Gray-coded write pointer;
+- clk_ddr issues the rows as they appear, and their 16 bytes come back into
+  a 16-entry return ring behind its own Gray pointer;
+- up to 15 rows are in flight (7 left the zoomed scenes short at 1 µs);
+- the layer tags stay on the 48 MHz side;
+- the DDR3 read-tag queue grew from 8 to 16 entries, so the BG and sprite
+  rings do not starve each other;
+- a finished text row now goes out on the shared response bus the clock it
+  arrives, ahead of the BG rows, so a text row can never be overwritten
+  while it waits;
+- the ring pointers reset on power-on only, as the sprite ring's do.
+
+**Checked in simulation**, at 100 clocks of latency with rotate writes:
+- macrossp stage 2, every 150 frames from 12700 to 17950: 36 of 36 frames
+  pixel-exact, 0 overruns;
+- play and attract samples: 22 of 22 exact;
+- quizmoon's attract, every 120 frames: 14 of 14 exact.
+
+M3 (`MP_PLAY=1`, 900 frames from reset) has 0 bad responses: BG
+0 / 16,733,279, text 0 / 5,183,976, sprites 0 / 822,184. It shows no BG or
+sprite overruns.
+
+**Savestates with cheats on.** On the same run, Alt+F1 during play saved
+the file, and then the game restarted at the Banpresto screen; a load did
+the same. With the cheats off the save worked. The engine masks every pause
+source so the CPUs can reach their monitors, but the cheat engine kept
+starting its poke walk at each vblank. That walk drives main RAM's only port
+(the back door) while it believes the CPU is held, so it corrupted the
+running CPU's accesses. Now no walk starts while `ss_busy` is set, and a walk
+already under way when a save starts keeps the CPU held until it ends
+(MacPlus.sv). The siblings use the same pause expression; whether it bites
+them depends on how their game RAM's back door shares the CPU's port (not
+checked).
+
+**On the board** (`756d6d13...`; timing met at seed 6, setup +0.171 ns,
+hold +0.241 ns; 36,916 ALMs (88 %), 552 / 553 M10K):
+- with the cheats on, Alt+F1 in play saved and the game ran on; F1 then
+  restored the saved point and play continued;
+- a full playthrough in Horz on HDMI (invincibility, maximum fire power,
+  10 Hz autofire): all seven areas and bosses, the ending, and the loop back
+  to area 1;
+  - the capture was checked every 2 s, and at full resolution in the stage 2
+    desert and river, the area 4-5 climb and the area 7 entry;
+  - there were no stripes or other faults; the noise dissolves at area
+    changes are the game's (MAME draws them too).
+- Vert 270 (screen_rotate's framebuffer writes added to DDR3): area 1 and
+  all of area 2, including the desert and the river, are clean.

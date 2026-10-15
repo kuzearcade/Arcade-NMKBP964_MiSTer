@@ -394,10 +394,14 @@ wire [23:0] ch_addr;
 wire  [7:0] ch_din;
 wire        ch_write, ch_access, ch_pause;
 wire  [6:0] ch_avail;
+// No poke walk starts while a savestate runs (MP-20): the engine masks pause so
+// the CPUs can reach their monitors, and the back door takes main RAM's only
+// port from a running CPU. On the board a save in play with cheats on crashed
+// the game back to its boot.
 cheats ch (
 	.clk(clk_sys), .reset(reset),
 	.ioctl_download(ioctl_download), .ioctl_wr(ioctl_wr), .ioctl_addr(ioctl_addr), .ioctl_index(ioctl_index), .ioctl_dout(ioctl_dout),
-	.enable(status[38:32]), .available(ch_avail), .vblank(vblank_core),
+	.enable(status[38:32]), .available(ch_avail), .vblank(vblank_core & ~ss_busy),
 	.ram_addr(ch_addr), .ram_din(ch_din), .ram_write(ch_write), .ram_access(ch_access), .ram_dout(hs_dout), .pause_cpu(ch_pause));
 assign hs_addr   = hs_pause ? hi_addr  : ch_addr;
 assign hs_din    = hs_pause ? hi_din   : ch_din;
@@ -458,8 +462,10 @@ savestate #(.SS_WORDS(20'h24900), .DDR_BASE(29'h07C00000), .SLOT_STRIDE(29'h0001
 
 macplus_core #(.CE_NUM(8'd33)) core (
 	.clk(clk_sys), .reset(core_reset), .quiz(quiz),
-	// the engine masks pause: both CPUs have to execute to reach their monitors
-	.pause((status[29] | hs_pause | ch_pause) & ~ss_busy), .flip(status[17]), .trace_on(1'b0),
+	// the engine masks pause: both CPUs have to execute to reach their monitors.
+	// A cheat walk already under way when a save starts (at most ~100 clocks)
+	// keeps the CPU held: it owns main RAM's port until it ends (MP-20).
+	.pause(((status[29] | hs_pause) & ~ss_busy) | ch_pause), .flip(status[17]), .trace_on(1'b0),
 	.inputs(inputs), .dsw(dsw),
 	.ram2_sel(hs_access), .ram2_addr(hs_off[16:2]), .ram2_we(hs_write & hs_access), .ram2_be(4'b0001 << hs_lane),
 	.ram2_din({4{hs_din}}), .ram2_dout(ram2_dout),

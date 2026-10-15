@@ -59,3 +59,17 @@ Timing met (worst setup slack +0.200 ns, fitter seed 12; seed 11 missed by
 | Boot | the 6 MB copy (MP-14): the screenshot at 9 s equals MAME's attract picture 43, 0 pixels differ (the 22 MB copy needed 11 s) |
 | Savestate round trip | 0 pixels between after-save and after-load |
 | Explosions (MP-14) | 45 s of play with autofire: the explosion captures are solid, no line gaps (the interim `8960a7b6...` build showed the same) |
+
+## 2026-10-15 — stage 2 stripes and a savestate crash (MP-20, `756d6d13...`)
+
+| check | result |
+|---|---|
+| Stage 2, release `0096f476...` | the desert drawn as horizontal stripes (stale BG lines), as in the report |
+| Alt+F1 in play with cheats on, release | the save is written, then the game restarts at the Banpresto screen; without cheats it is fine |
+| Same save, `756d6d13...` | play goes on; F1 restores the saved point |
+| Full playthrough, Horz, HDMI capture | cheats Invincibility, Maximum Fire Power, Infinite Credits/Lives, 10 Hz autofire, fire held: areas 1-7, every boss, the ending and the loop to area 1, with no stripes or other faults |
+| Vert 270 | areas 1-2 clean, desert and river at full resolution |
+
+The board was left with `Arcade-NMKBP964_20261015.rbf` (`756d6d13...`) as
+its NMKBP964 core and the release core in `/media/fat/_mptest_hold/`. The
+CFG was zeroed and the test `.mra` directory removed.

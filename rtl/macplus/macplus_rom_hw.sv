@@ -18,7 +18,8 @@
 //   port 3  text rows, 8 bytes = two pair reads
 // DDR3 (64-bit words, byte k in bits [8k+7:8k]), on clk_ddr (96 MHz, the
 // video clock screen_rotate drives DDRAM with):
-//   BG rows (16 bytes = 2 beats), ES5506 sample words (the containing qword,
+//   BG rows (16 bytes = 2 beats, up to 7 in flight through a ring as the
+//   sprite rows', MP-20), ES5506 sample words (the containing qword,
 //   kept in a one-qword buffer per bank, since the ES5506 fetches four words
 //   of a line in a row), the copier's reads and the fallback download's
 //   writes. Reads are pipelined (up to 8 in flight) and return in order.
@@ -145,46 +146,68 @@ module macplus_rom_hw #(
 
 	// ================================================================ 48 -> 96 request channels
 	// Each channel: a 48 MHz held request with its payload, a 96 MHz held ack.
-	//   ch 0  BG row (16 bytes, 2 beats)    payload: byte address in DDR, layer
+	//   (BG rows cross through their own ring, below: MP-20)
 	//   ch 1  sample word (1 beat)          payload: byte address
 	//   ch 2  copier burst read (8 beats)   payload: byte address
 	//   ch 3  fallback download byte write  payload: byte address, byte
 	// Acks come back as 96 MHz levels; the 48 MHz side re-registers them.
-	reg        bg_ch_req, smp_ch_req, cp_ch_req;
-	reg [31:0] bg_ch_addr, smp_ch_addr, cp_ch_addr;
-	reg        bg_ch_ack, smp_ch_ack, cp_ch_ack, fb_ack;
-	reg [127:0] bg_ch_data;
+	reg        smp_ch_req, cp_ch_req;
+	reg [31:0] smp_ch_addr, cp_ch_addr;
+	reg        smp_ch_ack, cp_ch_ack, fb_ack;
 	reg [63:0] smp_ch_q;
-	reg        fb_ack_s, bg_ack_s, smp_ack_s, cp_ack_s;
-	reg        fb_ack_m, bg_ack_m, smp_ack_m, cp_ack_m;
+	reg        fb_ack_s, smp_ack_s, cp_ack_s;
+	reg        fb_ack_m, smp_ack_m, cp_ack_m;
 	always @(posedge clk) begin
 		{fb_ack_s, fb_ack_m}   <= {fb_ack_m, fb_ack};
-		{bg_ack_s, bg_ack_m}   <= {bg_ack_m, bg_ch_ack};
 		{smp_ack_s, smp_ack_m} <= {smp_ack_m, smp_ch_ack};
 		{cp_ack_s, cp_ack_m}   <= {cp_ack_m, cp_ch_ack};
 	end
 	// ...and the requests into clk_ddr
-	reg [1:0] bg_rq_s, smp_rq_s, cp_rq_s, fb_rq_s, por_s;
+	reg [1:0] smp_rq_s, cp_rq_s, fb_rq_s, por_s;
 	always @(posedge clk_ddr) begin
-		bg_rq_s  <= {bg_rq_s[0], bg_ch_req};
 		smp_rq_s <= {smp_rq_s[0], smp_ch_req};
 		cp_rq_s  <= {cp_rq_s[0], cp_ch_req};
 		fb_rq_s  <= {fb_rq_s[0], fb_req};
 		por_s    <= {por_s[0], pwr_reset};
 	end
-	wire bg_rq = bg_rq_s[1], smp_rq = smp_rq_s[1], cp_rq = cp_rq_s[1], fb_rq = fb_rq_s[1], ddr_por = por_s[1];
+	wire smp_rq = smp_rq_s[1], cp_rq = cp_rq_s[1], fb_rq = fb_rq_s[1], ddr_por = por_s[1];
 
 	// ================================================================ BG front end (48 MHz)
-	// Accept one layer request a clock into an in-order queue; one row in
-	// flight to the DDR side at a time from this queue (the DDR side pipelines
-	// across channels); responses leave in queue order with the layer's bit.
-	// image offsets are 26 bits: the image is 62 MB (BG2 at 0x2600000, samples at
+	// BG rows cross to DDR3 through a ring, as the sprite rows do (MP-14):
+	// the accepted rows' image offsets go into bga[] with a Gray-coded write
+	// pointer that clk_ddr reads; each row's 16 bytes come back into bgrb[]
+	// (written on clk_ddr) behind that ring's Gray-coded write pointer. Up to 15
+	// rows are in flight (7 left a 1 us DDR3 latency short in the zoomed
+	// stage-2 scenes, sim/rtl/video_hw). Until MP-20 one row crossed at a time
+	// through a 4-phase handshake, so a row cost two crossings each way plus
+	// the DDR3 latency; on the board the stage-2 lines ran out of time and the
+	// layers kept stale lines (horizontal stripes). Slot k of both rings belongs
+	// to request k, and a request is accepted only while fewer than 15 are
+	// unconsumed, so no slot is reused before this side has taken it. Both
+	// sides write a slot on the edge that advances the pointer announcing it.
+	// Responses leave in request order with the layer's bit (bgl[], local).
+	// Image offsets are 26 bits: the image is 62 MB (BG2 at 0x2600000, samples at
 	// 0x2E00000). At 25 bits they wrapped past 32 MB into the sprite region
 	// (M3 response check, 2026-09-24: BG2 79,210 bad rows; MP-11).
-	reg [25:0] bq_addr [0:15];
-	reg [1:0]  bq_lay  [0:15];
-	reg [3:0]  bq_wr, bq_rd;
-	wire [4:0] bq_n = {1'b0, bq_wr} - {1'b0, bq_rd};
+	reg [25:0]  bga [0:15];
+	reg [1:0]   bgl [0:15];
+	reg [3:0]   bgw, bgc;                   // rows accepted, rows consumed (48 MHz)
+	reg [3:0]   bgw_g;                      // bgw in Gray code, for clk_ddr
+	reg [3:0]   bgrw_s1, bgrw_s2;           // bgrb's write pointer (Gray), synchronised
+	(* ramstyle = "logic" *) reg [127:0] bgrb [0:15];  // written on clk_ddr; registers, M10K is full
+	function [3:0] gray2bin4(input [3:0] g);
+		gray2bin4 = {g[3], g[3] ^ g[2], g[3] ^ g[2] ^ g[1], g[3] ^ g[2] ^ g[1] ^ g[0]};
+	endfunction
+	wire [3:0]  bgrw_b = gray2bin4(bgrw_s2);
+	// ...and on clk_ddr: the ring's write pointer synchronised, rows issued,
+	// rows written into bgrb (and in Gray code)
+	reg  [3:0]  bgw_s1, bgw_s2;
+	reg  [3:0]  bg_iss;
+	reg  [3:0]  bgrw, bgrw_g;
+	reg  [63:0] bg_lo;
+	wire [3:0]  bgw_d = gray2bin4(bgw_s2);
+	wire        bg_rq = bg_iss != bgw_d;
+	wire [4:0]  bg_n   = {1'b0, bgw} - {1'b0, bgc};
 	reg [1:0]  rr;
 	wire [22:0] la [0:3];
 	assign la[0] = bg_addr[22:0];  assign la[1] = bg_addr[45:23];
@@ -193,39 +216,36 @@ module macplus_rom_hw #(
 	function [25:0] bg_off(input [1:0] L, input [22:0] a);
 		bg_off = 26'h1600000 + {1'b0, L, 23'd0} + {3'd0, a};
 	endfunction
-	reg        bg_busy;
-	reg [1:0]  bg_cur;
 	always @(posedge clk) begin
 		bg_ready <= 4'd0; bg_valid <= 4'd0;
-		if (reset || !rom_ready) begin
-			bq_wr <= 4'd0; bq_rd <= 4'd0; bg_ch_req <= 1'b0; bg_busy <= 1'b0; rr <= 2'd0;
-			tqw <= 3'd0; tx_pend <= 1'b0;
-		end else begin
-			// accept one of layers 0..2 a clock (round robin) into the DDR3 queue
-			if (bq_n < 5'd14) begin
+		{bgrw_s2, bgrw_s1} <= {bgrw_s1, bgrw_g};
+		// the ring: power-on reset only, like the DDR3 side's pointers (ddr_por);
+		// a reset of one side alone would desynchronise it. The engines do not
+		// request while the core is held, and late rows are simply consumed.
+		if (pwr_reset) begin bgw <= 4'd0; bgc <= 4'd0; bgw_g <= 4'd0; rr <= 2'd0; end
+		else begin
+			// accept one of layers 0..2 a clock (round robin) into the ring
+			if (bg_n < 5'd15 && !reset && rom_ready) begin
 				if (bg_req[rr] && !bg_ready[rr]) begin
-					bq_addr[bq_wr] <= bg_off(rr, la[rr]); bq_lay[bq_wr] <= rr; bq_wr <= bq_wr + 4'd1; bg_ready[rr] <= 1'b1;
+					bga[bgw] <= bg_off(rr, la[rr]); bgl[bgw] <= rr; bgw <= bgw + 4'd1;
+					bgw_g <= (bgw + 4'd1) ^ ((bgw + 4'd1) >> 1);
+					bg_ready[rr] <= 1'b1;
 				end
 				rr <= (rr == 2'd2) ? 2'd0 : rr + 2'd1;
 			end
-			// the text layer (3) goes to the SDRAM text queue
-			if (bg_req[3] && !bg_ready[3] && tq_n < 4'd7) begin
-				tq_a[tqw] <= la[3]; tqw <= tqw + 3'd1; bg_ready[3] <= 1'b1;
+			// one response a clock on the shared bus: a finished text row first
+			// (it is emitted the clock it is seen, so tx_row is never overwritten),
+			// otherwise the oldest BG row
+			if (tx_done) begin
+				bg_data <= {64'd0, tx_row}; bg_valid[3] <= 1'b1;
+			end else if (bgc != bgrw_b) begin
+				bg_data <= bgrb[bgc]; bg_valid[bgl[bgc]] <= 1'b1; bgc <= bgc + 4'd1;
 			end
-			// a finished text row is emitted on a clock with no BG response
-			if (tx_done) tx_pend <= 1'b1;
-			if ((tx_pend || tx_done) && !(bg_busy && bg_ch_req && bg_ack_s)) begin
-				bg_data <= {64'd0, tx_row}; bg_valid[3] <= 1'b1; tx_pend <= 1'b0;
-			end
-			// one in flight
-			if (!bg_busy && bq_rd != bq_wr && !bg_ack_s) begin
-				bg_ch_req <= 1'b1; bg_ch_addr <= DDR_BASE + {6'd0, bq_addr[bq_rd]}; bg_cur <= bq_lay[bq_rd];
-				bq_rd <= bq_rd + 4'd1; bg_busy <= 1'b1;
-			end
-			if (bg_busy && bg_ch_req && bg_ack_s) begin
-				bg_ch_req <= 1'b0; bg_data <= bg_ch_data; bg_valid[bg_cur] <= 1'b1;
-			end
-			if (bg_busy && !bg_ch_req && !bg_ack_s) bg_busy <= 1'b0;
+		end
+		// the text layer (3) goes to the SDRAM text queue
+		if (reset || !rom_ready) tqw <= 3'd0;
+		else if (bg_req[3] && !bg_ready[3] && tq_n < 4'd7) begin
+			tq_a[tqw] <= la[3]; tqw <= tqw + 3'd1; bg_ready[3] <= 1'b1;
 		end
 	end
 
@@ -267,7 +287,9 @@ module macplus_rom_hw #(
 	// ================================================================ DDR3 master (96 MHz)
 	// Command issue: fixed priority BG > samples > copier > fallback write.
 	// Reads are tagged into an in-order queue; beats return in command order.
-	reg  [2:0] rq_ch [0:7];
+	// read tags in command order; 16 of them, so the BG ring (15) and the
+	// sprite ring (7) can both keep rows in flight (MP-20)
+	reg  [2:0] rq_ch [0:15];
 	// sprite rows (MP-14): the 48 MHz queue's write pointer, synchronised
 	reg  [2:0]  sqw_s1, sqw_s2;
 	reg  [2:0]  sp_iss;                     // rows issued to DDR3
@@ -275,53 +297,57 @@ module macplus_rom_hw #(
 	reg  [63:0] sp_lo;
 	wire [2:0]  sqw_d = gray2bin(sqw_s2);
 	wire        spr_rq = sp_iss != sqw_d;
-	reg  [3:0] rq_beats [0:7];
-	reg  [2:0] rq_wr, rq_rd;
-	wire [3:0] rq_n = {1'b0, rq_wr} - {1'b0, rq_rd};
-	reg        bg_seen, smp_seen, cp_seen;
+	reg  [3:0] rq_beats [0:15];
+	reg  [3:0] rq_wr, rq_rd;
+	wire [4:0] rq_n = {1'b0, rq_wr} - {1'b0, rq_rd};
+	reg        smp_seen, cp_seen;
+
 	reg  [3:0] beat;
 	reg  [63:0] cp_buf [0:7];
 	reg  [2:0]  cp_beats_in;
 	reg        cp_ready96;          // a copier burst is in cp_buf
-	reg        pend_ack_bg, pend_ack_smp;
 	// the command stage's choice, fixed priority BG > samples > copier > fallback > savestate
-	wire cmd_ok   = !((ddr_rd || ddr_we) && ddr_busy) && !ddr_yield && rq_n < 4'd7;
-	wire pick_hi  = (bg_rq && !bg_seen) || spr_rq || (smp_rq && !smp_seen) || (cp_rq && !cp_seen && rq_n == 4'd0)
-	              || (fb_rq && !fb_ack && rq_n == 4'd0);
-	assign ss_ddr_grant = !ddr_por && cmd_ok && !pick_hi && (ss_ddr_we || ss_ddr_rd) && rq_n == 4'd0;
+	wire cmd_ok   = !((ddr_rd || ddr_we) && ddr_busy) && !ddr_yield && rq_n < 5'd15;
+	wire pick_hi  = bg_rq || spr_rq || (smp_rq && !smp_seen) || (cp_rq && !cp_seen && rq_n == 5'd0)
+	              || (fb_rq && !fb_ack && rq_n == 5'd0);
+	assign ss_ddr_grant = !ddr_por && cmd_ok && !pick_hi && (ss_ddr_we || ss_ddr_rd) && rq_n == 5'd0;
 	always @(posedge clk_ddr) begin
 		ss_ddr_ready <= 1'b0;
 		{sqw_s2, sqw_s1} <= {sqw_s1, sqw_g};
+		{bgw_s2, bgw_s1} <= {bgw_s1, bgw_g};
 		if (ddr_por) begin
 			sp_iss <= 3'd0; rbw <= 3'd0; rbw_g <= 3'd0;
-			ddr_rd <= 1'b0; ddr_we <= 1'b0; rq_wr <= 3'd0; rq_rd <= 3'd0; beat <= 4'd0;
-			bg_ch_ack <= 1'b0; smp_ch_ack <= 1'b0; cp_ch_ack <= 1'b0; fb_ack <= 1'b0;
-			bg_seen <= 1'b0; smp_seen <= 1'b0; cp_seen <= 1'b0;
+			bg_iss <= 4'd0; bgrw <= 4'd0; bgrw_g <= 4'd0;
+			ddr_rd <= 1'b0; ddr_we <= 1'b0; rq_wr <= 4'd0; rq_rd <= 4'd0; beat <= 4'd0;
+			smp_ch_ack <= 1'b0; cp_ch_ack <= 1'b0; fb_ack <= 1'b0;
+			smp_seen <= 1'b0; cp_seen <= 1'b0;
 		end else begin
 			// release acks when the requester drops
-			if (!bg_rq)  begin bg_ch_ack <= 1'b0; bg_seen <= 1'b0; end
 			if (!smp_rq) begin smp_ch_ack <= 1'b0; smp_seen <= 1'b0; end
 			if (!cp_rq)  begin cp_ch_ack <= 1'b0; cp_seen <= 1'b0; end
 			if (!fb_rq)     fb_ack <= 1'b0;
 			// command stage (hold while the port is busy)
 			if ((ddr_rd || ddr_we) && !ddr_busy) begin ddr_rd <= 1'b0; ddr_we <= 1'b0; end
 			if (cmd_ok) begin
-				if (bg_rq && !bg_seen) begin
-					ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= bg_ch_addr[31:3]; ddr_burstcnt <= 8'd2;
-					rq_ch[rq_wr] <= 2'd0; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 3'd1; bg_seen <= 1'b1;
+				if (bg_rq) begin
+					begin : bga_
+						reg [31:0] a; a = DDR_BASE + {6'd0, bga[bg_iss]};
+						ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= a[31:3]; ddr_burstcnt <= 8'd2;
+					end
+					rq_ch[rq_wr] <= 3'd0; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 4'd1; bg_iss <= bg_iss + 4'd1;
 				end else if (spr_rq) begin
 					begin : spra
 						reg [31:0] a; a = DDR_BASE + 32'h600000 + {8'd0, sq_a[sp_iss]};
 						ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= a[31:3]; ddr_burstcnt <= 8'd2;
 					end
-					rq_ch[rq_wr] <= 3'd4; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 3'd1; sp_iss <= sp_iss + 3'd1;
+					rq_ch[rq_wr] <= 3'd4; rq_beats[rq_wr] <= 4'd2; rq_wr <= rq_wr + 4'd1; sp_iss <= sp_iss + 3'd1;
 				end else if (smp_rq && !smp_seen) begin
 					ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= smp_ch_addr[31:3]; ddr_burstcnt <= 8'd1;
-					rq_ch[rq_wr] <= 2'd1; rq_beats[rq_wr] <= 4'd1; rq_wr <= rq_wr + 3'd1; smp_seen <= 1'b1;
-				end else if (cp_rq && !cp_seen && rq_n == 4'd0) begin
+					rq_ch[rq_wr] <= 2'd1; rq_beats[rq_wr] <= 4'd1; rq_wr <= rq_wr + 4'd1; smp_seen <= 1'b1;
+				end else if (cp_rq && !cp_seen && rq_n == 5'd0) begin
 					ddr_rd <= 1'b1; ddr_we <= 1'b0; ddr_addr <= cp_ch_addr[31:3]; ddr_burstcnt <= 8'd8;
-					rq_ch[rq_wr] <= 2'd2; rq_beats[rq_wr] <= 4'd8; rq_wr <= rq_wr + 3'd1; cp_seen <= 1'b1;
-				end else if (fb_rq && !fb_ack && rq_n == 4'd0) begin
+					rq_ch[rq_wr] <= 2'd2; rq_beats[rq_wr] <= 4'd8; rq_wr <= rq_wr + 4'd1; cp_seen <= 1'b1;
+				end else if (fb_rq && !fb_ack && rq_n == 5'd0) begin
 					begin : fbw
 						reg [31:0] a; a = DDR_BASE + {5'd0, fb_addr};
 						ddr_we <= 1'b1; ddr_rd <= 1'b0; ddr_addr <= a[31:3]; ddr_burstcnt <= 8'd1;
@@ -334,16 +360,19 @@ module macplus_rom_hw #(
 						ddr_we <= 1'b1; ddr_rd <= 1'b0; ddr_din <= ss_ddr_din; ddr_be <= 8'hFF;
 					end else begin
 						ddr_rd <= 1'b1; ddr_we <= 1'b0;
-						rq_ch[rq_wr] <= 2'd3; rq_beats[rq_wr] <= 4'd1; rq_wr <= rq_wr + 3'd1;
+						rq_ch[rq_wr] <= 2'd3; rq_beats[rq_wr] <= 4'd1; rq_wr <= rq_wr + 4'd1;
 					end
 				end
 			end
 			// data stage
-			if (ddr_dout_ready && rq_n != 4'd0) begin
+			if (ddr_dout_ready && rq_n != 5'd0) begin
 				case (rq_ch[rq_rd])
-				2'd0: begin
-					if (beat == 4'd0) bg_ch_data[63:0] <= ddr_dout;
-					else begin bg_ch_data[127:64] <= ddr_dout; bg_ch_ack <= 1'b1; end
+				3'd0: begin
+					if (beat == 4'd0) bg_lo <= ddr_dout;
+					else begin
+						bgrb[bgrw] <= {ddr_dout, bg_lo}; bgrw <= bgrw + 4'd1;
+						bgrw_g <= (bgrw + 4'd1) ^ ((bgrw + 4'd1) >> 1);
+					end
 				end
 				2'd1: begin smp_ch_q <= ddr_dout; smp_ch_ack <= 1'b1; end
 				2'd3: begin ss_ddr_q <= ddr_dout; ss_ddr_ready <= 1'b1; end
@@ -360,7 +389,7 @@ module macplus_rom_hw #(
 				end
 				default: ;
 				endcase
-				if (beat + 4'd1 == rq_beats[rq_rd]) begin beat <= 4'd0; rq_rd <= rq_rd + 3'd1; end
+				if (beat + 4'd1 == rq_beats[rq_rd]) begin beat <= 4'd0; rq_rd <= rq_rd + 4'd1; end
 				else beat <= beat + 4'd1;
 			end
 		end
@@ -510,7 +539,7 @@ module macplus_rom_hw #(
 	reg [22:0] tq_a [0:7];
 	reg [2:0]  tqw, tqr;
 	wire [3:0] tq_n = {1'b0, tqw} - {1'b0, tqr};
-	reg        tx_act, tx_req, tx_k, tx_done, tx_pend;
+	reg        tx_act, tx_req, tx_k, tx_done;
 	reg [24:0] tx_base;
 	reg [31:0] tx_acc;
 	reg [63:0] tx_row;
