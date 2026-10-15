@@ -773,9 +773,14 @@ starting its poke walk at each vblank. That walk drives main RAM's only port
 (the back door) while it believes the CPU is held, so it corrupted the
 running CPU's accesses. Now no walk starts while `ss_busy` is set, and a walk
 already under way when a save starts keeps the CPU held until it ends
-(MacPlus.sv). The siblings use the same pause expression; whether it bites
-them depends on how their game RAM's back door shares the CPU's port (not
-checked).
+(MacPlus.sv). The siblings were checked on 2026-10-15: GingaNin (GN-17),
+MS1BCD (MS1-69), MS1Z (MS1Z-19), SandScrp (SS-20) and NMK16's Macross2 and
+Raphero (NMK-42) had the same wiring, the back door taking the port from the
+CPU, and got the same change. None showed it on the board (GingaNin's
+release wrote 15 of 15 saves with every cheat on): their 68000 evidently
+pushes its park frame after the walk has ended. NMK16's Gunnail and Afega
+serve the back door only on clocks the CPU leaves free, and Namco System 2's
+walk waits for a bus grant that is masked during a savestate.
 
 **On the board** (`756d6d13...`; timing met at seed 6, setup +0.171 ns,
 hold +0.241 ns; 36,916 ALMs (88 %), 552 / 553 M10K):
